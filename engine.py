@@ -39,9 +39,8 @@ def validate_format(file_bytes):
     """
     try:
         xl  = pd.ExcelFile(io.BytesIO(file_bytes))
-        # Try sheet 1 (skip TOC at 0)
         si  = 1 if len(xl.sheet_names) > 1 else 0
-        df  = xl.parse(si, header=None, nrows=10, na_values=[''])
+        df  = xl.parse(si, header=None, nrows=12, na_values=[''])
         raw = df.values.tolist()
     except Exception:
         return None, 0
@@ -52,25 +51,46 @@ def validate_format(file_bytes):
             return str(v).strip() if v and str(v) not in ('nan','None') else ''
         except: return ''
 
-    # Corporate Reputation: question at row 3, Total at row 5 col 1
+    def row_has_total(r):
+        """Check if any cell in a row contains total."""
+        try:
+            return any('total' in str(v).lower()
+                       for v in (raw[r] or [])
+                       if v and str(v) not in ('nan','None'))
+        except: return False
+
+    # Corporate Reputation (fmt6):
+    # Row 2 = descriptor ('Total sample'), row 3 = question, row 4 col 1 = Total
     if len(raw) > 5:
-        r3 = cell(3,0); r5c1 = cell(5,1)
-        if len(r3) > 10 and 'total' in r5c1.lower():
+        r2   = cell(2, 0)
+        r3   = cell(3, 0)
+        r4c1 = cell(4, 1)
+        r5c1 = cell(5, 1)
+        if (len(r3) > 10
+                and ('total sample' in r2.lower() or 'weight' in r2.lower() or len(r2) < 50)
+                and ('total' in r4c1.lower() or 'total' in r5c1.lower())):
             return "Corporate Reputation", 95
 
-    # Global Brand Identity: question at row 2, Total at row 3 col 0 or 1
-    if len(raw) > 4:
-        r2 = cell(2,0)
-        r3c0 = cell(3,0); r3c1 = cell(3,1)
-        if len(r2) > 10 and ('total' in r3c0.lower() or 'total' in r3c1.lower()):
+    # Global Brand Identity (fmt2):
+    # Row 2 = question, row 3 col 0 or col 1 = Total, row 4 = sub-labels
+    if len(raw) > 5:
+        r2   = cell(2, 0)
+        r3c0 = cell(3, 0)
+        r3c1 = cell(3, 1)
+        r4c1 = cell(4, 1)
+        if (len(r2) > 10
+                and ('total' in r3c0.lower() or 'total' in r3c1.lower())
+                and 'total' in r4c1.lower()):
             return "Global Brand Identity", 90
 
-    # KP: question at row 2, Total somewhere in row 1
+    # KP: row 2 = question, Total somewhere in row 1
     if len(raw) > 3:
-        r2    = cell(2,0)
-        row1  = [cell(1,c) for c in range(min(10, len(raw[1]) if raw[1] else 0))]
-        if len(r2) > 10 and any('total' in v.lower() for v in row1 if v):
-            return "KP", 85
+        r2 = cell(2, 0)
+        if len(r2) > 10 and row_has_total(1):
+            # Make sure it's not Corporate Rep or GBI
+            r4c1 = cell(4, 1)
+            if 'total' not in r4c1.lower():
+                return "KP", 85
 
     return None, 0
 
