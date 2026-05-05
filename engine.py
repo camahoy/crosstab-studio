@@ -6,13 +6,18 @@ Wave-by-wave comparison support.
 
 print("CROSSTAB STUDIO ENGINE v1.1")
 
-import io, math, re
+import io, math, re, os
 import numpy as np
 import pandas as pd
 import openpyxl
 from openpyxl.styles import Font as XLFont, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 from profiles import PROFILES
+from docx import Document
+from docx.shared import Pt, RGBColor, Inches
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
+from docx.text.paragraph import Paragraph as DocxPara
 
 
 # ── Value coercion ────────────────────────────────────────────
@@ -563,8 +568,6 @@ def _add_run(para, text, bold=False, size_pt=None, color=None):
 
 
 def _insert_para_after(ref_para, text='', bold=False, size_pt=None, color=None):
-    from docx.oxml import OxmlElement
-    from docx.text.paragraph import Paragraph as DocxPara
     new_p = OxmlElement('w:p')
     ref_para._element.addnext(new_p)
     fake = DocxPara(new_p, ref_para._parent)
@@ -575,8 +578,6 @@ def _insert_para_after(ref_para, text='', bold=False, size_pt=None, color=None):
 
 def _write_word_table(doc, insert_after_para, question_wording,
                       col_names, base_vals, answers, values):
-    from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
 
     q_para = _insert_para_after(insert_after_para, question_wording,
                                  bold=True, size_pt=10, color=BRAND_COLOR)
@@ -676,8 +677,6 @@ def generate_word(selections, files, profile_name, col_indices, col_names,
             tbl_el = _write_word_table(doc, insert_after, title,
                                        col_names, p['base_vals'],
                                        p['answers'], p['values'])
-            from docx.oxml import OxmlElement
-            from docx.text.paragraph import Paragraph as DocxPara
             spacer_el = OxmlElement('w:p')
             tbl_el.addnext(spacer_el)
             insert_after = DocxPara(spacer_el, topline_para._parent)
