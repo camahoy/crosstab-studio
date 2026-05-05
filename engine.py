@@ -261,6 +261,9 @@ def get_columns(file_bytes, profile_name):
                 g = hrow[j]
                 s = srow[j] if srow and j < len(srow) else ''
                 if isinstance(g, str) and g.strip() and g.strip() not in ('\xa0',):
+                    # Skip if it looks like a letter code row (all single letters)
+                    if len(g.strip()) == 1 and g.strip().isalpha():
+                        continue
                     cols.append((j, g.strip(), s.strip() if isinstance(s, str) else ''))
             if cols:
                 return cols
@@ -565,7 +568,8 @@ def generate_excel(selections, files, profile_name, col_indices, col_names):
 
 # ── Word / Media Release export ───────────────────────────────
 
-TEMPLATE_PATH = 'template_doc.docx'
+# Resolve template path relative to this file so it works on Streamlit Cloud
+TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template_doc.docx')
 BRAND_COLOR   = RGBColor(0x2F, 0x46, 0x9C)
 
 
