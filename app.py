@@ -1,9 +1,10 @@
 """
-app.py — Crosstab Studio v1.1
+app.py — Crosstab Studio v1.2
+Upload-first flow: file detection drives profile selection.
 """
 
 import streamlit as st
-from engine import fast_scan, get_columns, generate_excel, validate_format
+from engine import fast_scan, get_columns, generate_excel, detect_and_describe
 from profiles import get_profile_names, get_profile
 
 st.set_page_config(
@@ -16,7 +17,7 @@ st.set_page_config(
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Sora:wght@300;400;600;700&display=swap');
-html, body, [class*="css"] { font-family: 'Sora', sans-serif; background: #F7F9FC; }
+html, body, [class*="css"] { font-family:'Sora',sans-serif; background:#F7F9FC; }
 
 .cs-header { display:flex; align-items:baseline; gap:14px; margin-bottom:2rem;
              padding-bottom:1.25rem; border-bottom:2px solid #0F2D4A; }
@@ -29,10 +30,19 @@ html, body, [class*="css"] { font-family: 'Sora', sans-serif; background: #F7F9F
 .step-label { font-family:'DM Mono',monospace; font-size:0.68rem; font-weight:500;
               letter-spacing:0.1em; text-transform:uppercase; color:#1A6EBD; margin-bottom:6px; }
 
-.spec-row { display:flex; gap:8px; align-items:center; padding:4px 0;
-            border-bottom:1px solid #F1F5F9; font-size:0.82rem; }
-.spec-key { color:#6B7280; min-width:140px; font-family:'DM Mono',monospace; font-size:0.75rem; }
-.spec-val { color:#0F2D4A; font-weight:500; }
+.detect-card { background:white; border:1.5px solid #E2E8F0; border-radius:10px;
+               padding:1.25rem 1.5rem; margin-bottom:1rem; }
+.detect-card.matched { border-color:#86EFAC; }
+.detect-card.unmatched { border-color:#FECACA; }
+
+.detect-title { font-weight:700; font-size:1rem; color:#0F2D4A; margin-bottom:0.75rem; }
+.detect-row { display:flex; gap:10px; align-items:flex-start; padding:5px 0;
+              border-bottom:1px solid #F1F5F9; font-size:0.82rem; }
+.detect-key { color:#6B7280; min-width:180px; font-family:'DM Mono',monospace;
+              font-size:0.73rem; padding-top:1px; }
+.detect-val { color:#0F2D4A; font-weight:500; flex:1; }
+.detect-val.ok  { color:#16A34A; }
+.detect-val.warn { color:#D97706; }
 
 .stat-pill { display:inline-block; background:#EFF6FF; color:#1A6EBD;
              font-family:'DM Mono',monospace; font-size:0.7rem;
@@ -40,19 +50,14 @@ html, body, [class*="css"] { font-family: 'Sora', sans-serif; background: #F7F9F
 
 .type-badge { display:inline-block; font-family:'DM Mono',monospace; font-size:0.65rem;
               padding:1px 6px; border-radius:4px; margin-left:4px; }
-.type-standard  { background:#DCFCE7; color:#166534; }
-.type-t2b       { background:#DBEAFE; color:#1D4ED8; }
-.type-b2b       { background:#FEF3C7; color:#B45309; }
+.type-standard     { background:#DCFCE7; color:#166534; }
+.type-t2b          { background:#DBEAFE; color:#1D4ED8; }
+.type-b2b          { background:#FEF3C7; color:#B45309; }
 .type-summary_grid { background:#F3E8FF; color:#7C3AED; }
-.type-mean      { background:#FFE4E6; color:#BE123C; }
+.type-mean         { background:#FFE4E6; color:#BE123C; }
 
-.valid-ok   { background:#DCFCE7; border:1px solid #86EFAC; border-radius:8px;
-              padding:0.75rem 1rem; color:#166534; font-size:0.88rem; }
-.valid-fail { background:#FEF2F2; border:1px solid #FECACA; border-radius:8px;
-              padding:0.75rem 1rem; color:#991B1B; font-size:0.88rem; }
-.valid-warn { background:#FFFBEB; border:1px solid #FDE68A; border-radius:8px;
-              padding:0.75rem 1rem; color:#92400E; font-size:0.88rem; }
-
+.unmatched-box { background:#FEF2F2; border:1px solid #FECACA; border-radius:8px;
+                 padding:1rem 1.25rem; color:#991B1B; font-size:0.88rem; margin:0.5rem 0; }
 .coming-soon { background:#FFFBEB; border:1px solid #FDE68A; border-radius:8px;
                padding:1rem 1.25rem; color:#713F12; font-size:0.88rem; }
 
@@ -67,7 +72,6 @@ hr { border:none; border-top:1px solid #E2E8F0; margin:1.5rem 0; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Header ────────────────────────────────────────────────────
 st.markdown("""
 <div class="cs-header">
     <div class="cs-logo">Crosstab<span> Studio</span></div>
@@ -77,9 +81,9 @@ st.markdown("""
 
 # ── State ─────────────────────────────────────────────────────
 for k, v in {
-    'profile_name': None, 'files': [], 'question_groups': [],
-    'columns': [], 'selected_qs': set(), 'selected_cols': [],
-    'scan_done': False, 'validation': None,
+    'files': [], 'detected': None, 'confirmed_profile': None,
+    'question_groups': [], 'columns': [], 'selected_qs': set(),
+    'selected_cols': [], 'scan_done': False,
 }.items():
     if k not in st.session_state:
         st.session_state[k] = v
@@ -93,61 +97,14 @@ TYPE_LABELS = {
 }
 
 # ═══════════════════════════════════════════════════
-# STEP 1 — Profile + Specs
+# STEP 1 — Upload
 # ═══════════════════════════════════════════════════
-col_profile, col_specs = st.columns([1, 1.4])
-
-with col_profile:
-    st.markdown('<div class="step-label">Step 1 — Format profile</div>', unsafe_allow_html=True)
-    chosen = st.selectbox("Profile", get_profile_names(), label_visibility="collapsed")
-
-    if chosen != st.session_state.profile_name:
-        st.session_state.profile_name = chosen
-        st.session_state.scan_done    = False
-        st.session_state.selected_qs  = set()
-        st.session_state.files        = []
-        st.session_state.validation   = None
-
-with col_specs:
-    if chosen and chosen != "+ Add new format":
-        p = get_profile(chosen)
-        st.markdown('<div class="step-label">Profile specs</div>', unsafe_allow_html=True)
-        for key, val in p.get("specs", []):
-            st.markdown(
-                f'<div class="spec-row"><span class="spec-key">{key}</span>'
-                f'<span class="spec-val">{val}</span></div>',
-                unsafe_allow_html=True
-            )
-        mode = p.get("multi_file_mode", "waves")
-        st.markdown(
-            f'<div class="spec-row"><span class="spec-key">Multi-file mode</span>'
-            f'<span class="spec-val">{"Wave comparison" if mode == "waves" else "Subgroup comparison"}</span></div>',
-            unsafe_allow_html=True
-        )
-
-if chosen == "+ Add new format":
-    st.markdown("""
-    <div class="coming-soon">
-        <strong>Custom format builder — coming soon</strong><br>
-        Define your own row structure, save it with a name, and reuse it across sessions.
-    </div>""", unsafe_allow_html=True)
-    st.stop()
-
-st.markdown('<hr>', unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════
-# STEP 2 — Upload
-# ═══════════════════════════════════════════════════
-profile    = get_profile(chosen)
-mode       = profile.get("multi_file_mode", "waves")
-mode_label = "wave" if mode == "waves" else "subgroup"
-
-st.markdown('<div class="step-label">Step 2 — Upload files</div>', unsafe_allow_html=True)
+st.markdown('<div class="step-label">Step 1 — Upload your file</div>', unsafe_allow_html=True)
 st.markdown(
-    f"<div style='font-size:0.8rem;color:#6B7280;margin-bottom:10px'>"
-    f"Upload one or more files. Each file = one {mode_label}. "
-    f"Label each one ({'W1, W2, W3' if mode == 'waves' else 'Gen Pop, Tech Elite'} etc)."
-    f"</div>",
+    "<div style='font-size:0.8rem;color:#6B7280;margin-bottom:10px'>"
+    "Upload one or more files. If comparing waves or subgroups, upload all files here "
+    "and label each one (e.g. W1, W2, W3 or Gen Pop, Tech Elite)."
+    "</div>",
     unsafe_allow_html=True
 )
 
@@ -158,60 +115,155 @@ uploaded_files = st.file_uploader(
 )
 
 if uploaded_files:
-    if len(uploaded_files) != len(st.session_state.files):
-        st.session_state.files     = []
-        st.session_state.scan_done = False
-        st.session_state.validation = None
+    files_changed = len(uploaded_files) != len(st.session_state.files)
+    if files_changed:
+        st.session_state.files             = []
+        st.session_state.detected          = None
+        st.session_state.confirmed_profile = None
+        st.session_state.scan_done         = False
+        st.session_state.selected_qs       = set()
 
-    labels_col, _ = st.columns([1.5, 1])
-    with labels_col:
-        new_files = []
+    new_files = []
+    label_col, _ = st.columns([1.5, 1])
+    with label_col:
         for i, uf in enumerate(uploaded_files):
-            default = f"W{i+1}" if mode == "waves" else uf.name.replace('.xlsx','')[:20]
+            default = f"W{i+1}" if len(uploaded_files) > 1 else uf.name.replace('.xlsx','')[:25]
             label   = st.text_input(
                 f"Label — {uf.name[:40]}",
                 value=default,
                 key=f"lbl_{i}_{uf.name}",
             )
-            new_files.append({'bytes': uf.getvalue(), 'label': label})
-        st.session_state.files = new_files
+            new_files.append({'bytes': uf.getvalue(), 'label': label, 'name': uf.name})
+    st.session_state.files = new_files
 
-    # ── Format validation ──────────────────────────
-    if st.session_state.validation is None and st.session_state.files:
-        matched, confidence = validate_format(st.session_state.files[0]['bytes'])
-        st.session_state.validation = (matched, confidence)
+    # ── Auto-detect on first file ──────────────────
+    if st.session_state.detected is None and new_files:
+        with st.spinner("Detecting format..."):
+            st.session_state.detected = detect_and_describe(new_files[0]['bytes'])
 
-    matched, confidence = st.session_state.validation or (None, 0)
+st.markdown('<hr>', unsafe_allow_html=True)
 
-    if matched == chosen:
+# ═══════════════════════════════════════════════════
+# STEP 2 — Format detection result
+# ═══════════════════════════════════════════════════
+if st.session_state.files and st.session_state.detected is not None:
+    det = st.session_state.detected
+    st.markdown('<div class="step-label">Step 2 — Confirm format</div>', unsafe_allow_html=True)
+
+    matched_profile = det.get('matched_profile')
+    findings        = det.get('findings', [])
+    sample_cols     = det.get('sample_columns', [])
+    n_sheets        = det.get('n_sheets', 0)
+
+    card_class = "matched" if matched_profile else "unmatched"
+
+    st.markdown(f'<div class="detect-card {card_class}">', unsafe_allow_html=True)
+
+    if matched_profile:
+        p = get_profile(matched_profile)
         st.markdown(
-            f'<div class="valid-ok">✓ File recognised as <strong>{matched}</strong> '
-            f'(confidence {confidence}%)</div>',
+            f'<div class="detect-title">✓ Format detected</div>',
             unsafe_allow_html=True
         )
-    elif matched and matched != chosen:
-        st.markdown(
-            f'<div class="valid-warn">⚠ File looks like <strong>{matched}</strong> '
-            f'but <strong>{chosen}</strong> is selected. '
-            f'Consider switching profile.</div>',
-            unsafe_allow_html=True
-        )
+        # Show what was found
+        for key, val, status in findings:
+            cls = 'ok' if status == 'ok' else 'warn' if status == 'warn' else ''
+            st.markdown(
+                f'<div class="detect-row">'
+                f'<span class="detect-key">{key}</span>'
+                f'<span class="detect-val {cls}">{val}</span>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+        if sample_cols:
+            st.markdown(
+                f'<div class="detect-row">'
+                f'<span class="detect-key">Columns found</span>'
+                f'<span class="detect-val">{" · ".join(sample_cols[:8])}'
+                f'{"  +" + str(len(sample_cols)-8) + " more" if len(sample_cols) > 8 else ""}'
+                f'</span></div>',
+                unsafe_allow_html=True
+            )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        col_confirm, col_override = st.columns([2, 1])
+        with col_confirm:
+            if st.session_state.confirmed_profile != matched_profile:
+                if st.button(f"✓  Confirm — use this format"):
+                    st.session_state.confirmed_profile = matched_profile
+                    st.session_state.scan_done         = False
+                    st.session_state.selected_qs       = set()
+                    st.rerun()
+        with col_override:
+            other = st.selectbox(
+                "Override profile",
+                ["— use detected —"] + [p for p in get_profile_names() if p != matched_profile and p != "+ Add new format"],
+                label_visibility="collapsed",
+                key="profile_override",
+            )
+            if other != "— use detected —" and st.button("Apply override"):
+                st.session_state.confirmed_profile = other
+                st.session_state.scan_done         = False
+                st.session_state.selected_qs       = set()
+                st.rerun()
+
     else:
         st.markdown(
-            '<div class="valid-fail">✗ Format not recognised. If this is a new banner type, '
-            'share the file structure with your admin to add support.</div>',
+            '<div class="detect-title">✗ Format not recognised</div>',
+            unsafe_allow_html=True
+        )
+        for key, val, status in findings:
+            st.markdown(
+                f'<div class="detect-row">'
+                f'<span class="detect-key">{key}</span>'
+                f'<span class="detect-val">{val}</span>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown(
+            '<div class="unmatched-box">'
+            'This file structure is not currently supported. '
+            'Run <strong>examine_structure.py</strong> on this file in Colab and share the output '
+            'to add support for this format.'
+            '</div>',
             unsafe_allow_html=True
         )
 
-# ── Scan button ────────────────────────────────────
-if st.session_state.files and not st.session_state.scan_done:
+        st.markdown("<br>", unsafe_allow_html=True)
+        manual = st.selectbox(
+            "Or manually select a profile to try:",
+            ["— select —"] + [p for p in get_profile_names() if p != "+ Add new format"],
+            label_visibility="collapsed",
+        )
+        if manual != "— select —" and st.button("Try this profile"):
+            st.session_state.confirmed_profile = manual
+            st.session_state.scan_done         = False
+            st.rerun()
+
     st.markdown('<hr>', unsafe_allow_html=True)
-    if st.button("◈  Scan files"):
+
+# ═══════════════════════════════════════════════════
+# STEP 3 — Scan
+# ═══════════════════════════════════════════════════
+confirmed = st.session_state.confirmed_profile
+if confirmed and st.session_state.files and not st.session_state.scan_done:
+    p    = get_profile(confirmed)
+    mode = p.get("multi_file_mode", "waves") if p else "waves"
+    st.markdown(
+        f"<div style='font-size:0.82rem;color:#374151;margin-bottom:12px'>"
+        f"Ready to scan using <strong>{confirmed}</strong> profile. "
+        f"{'Multiple files will be compared as waves.' if len(st.session_state.files) > 1 else ''}"
+        f"</div>",
+        unsafe_allow_html=True
+    )
+    if st.button("◈  Scan file"):
         with st.spinner("Scanning..."):
             try:
-                ref   = st.session_state.files[0]['bytes']
-                groups = fast_scan(ref, chosen)
-                cols   = get_columns(ref, chosen)
+                ref    = st.session_state.files[0]['bytes']
+                groups = fast_scan(ref, confirmed)
+                cols   = get_columns(ref, confirmed)
                 st.session_state.question_groups = groups
                 st.session_state.columns         = cols
                 st.session_state.scan_done       = True
@@ -222,14 +274,13 @@ if st.session_state.files and not st.session_state.scan_done:
                 import traceback; st.code(traceback.format_exc())
 
 # ═══════════════════════════════════════════════════
-# STEP 3 — Select questions + columns
+# STEP 4 — Select questions + columns
 # ═══════════════════════════════════════════════════
 if st.session_state.scan_done:
     groups = st.session_state.question_groups
     cols   = st.session_state.columns
     n_f    = len(st.session_state.files)
 
-    st.markdown('<hr>', unsafe_allow_html=True)
     st.markdown(
         f'<span class="stat-pill">{len(groups)} questions</span>'
         f'<span class="stat-pill">{sum(len(g["sheets"]) for g in groups)} sheets</span>'
@@ -246,12 +297,10 @@ if st.session_state.scan_done:
         c1, c2, c3 = st.columns([1,1,2])
         with c1:
             if st.button("Select all"):
-                st.session_state.selected_qs = {g['prefix'] for g in groups}
-                st.rerun()
+                st.session_state.selected_qs = {g['prefix'] for g in groups}; st.rerun()
         with c2:
             if st.button("Clear all"):
-                st.session_state.selected_qs = set()
-                st.rerun()
+                st.session_state.selected_qs = set(); st.rerun()
         with c3:
             search = st.text_input("Search", placeholder="Filter...", label_visibility="collapsed")
 
@@ -268,26 +317,20 @@ if st.session_state.scan_done:
             types   = g.get('types', [])
             checked = prefix in st.session_state.selected_qs
 
-            # Build type badges HTML
-            badges = ''
-            for t in types:
-                label, cls = TYPE_LABELS.get(t, (t, 'standard'))
-                badges += f'<span class="type-badge type-{cls}">{label}</span>'
-
-            # Checkbox label
-            short   = f"{wording[:65]}{'…' if len(wording)>65 else ''}"
             new_val = st.checkbox(
-                f"**{prefix}** — {short} *({n_s})*",
-                value=checked,
-                key=f"q_{prefix}",
+                f"**{prefix}** — {wording[:65]}{'…' if len(wording)>65 else ''} *({n_s})*",
+                value=checked, key=f"q_{prefix}",
             )
-            if badges:
+            if types:
+                badges = ''.join(
+                    f'<span class="type-badge type-{TYPE_LABELS.get(t,("",t))[1]}">'
+                    f'{TYPE_LABELS.get(t,(t,t))[0]}</span>'
+                    for t in types
+                )
                 st.markdown(
-                    f'<div style="margin-top:-12px;margin-bottom:4px;padding-left:28px">'
-                    f'{badges}</div>',
+                    f'<div style="margin-top:-12px;margin-bottom:4px;padding-left:28px">{badges}</div>',
                     unsafe_allow_html=True
                 )
-
             if new_val != checked:
                 if new_val: st.session_state.selected_qs.add(prefix)
                 else:       st.session_state.selected_qs.discard(prefix)
@@ -295,7 +338,6 @@ if st.session_state.scan_done:
     with right:
         st.markdown('<div class="step-label">Step 4 — Select columns</div>', unsafe_allow_html=True)
         st.markdown("<div style='font-size:0.78rem;color:#6B7280;margin-bottom:8px'>Subgroups / countries to include</div>", unsafe_allow_html=True)
-
         sel_cols = []
         for j, g, s in cols:
             label   = g if not s or s.lower() == g.lower() else f"{g} — {s}"
@@ -305,20 +347,19 @@ if st.session_state.scan_done:
         st.session_state.selected_cols = sel_cols
 
     # ═══════════════════════════════════════════════
-    # STEP 5 — Generate
+    # STEP 5 — Export
     # ═══════════════════════════════════════════════
     st.markdown('<hr>', unsafe_allow_html=True)
     st.markdown('<div class="step-label">Step 5 — Export</div>', unsafe_allow_html=True)
 
     n_sel     = len(st.session_state.selected_qs)
     n_col_sel = len(st.session_state.selected_cols)
-    n_f       = len(st.session_state.files)
 
     if n_f > 1:
         st.markdown(
             f"<div style='font-size:0.82rem;color:#374151;margin-bottom:8px'>"
             f"Wave comparison: {', '.join(f['label'] for f in st.session_state.files)}"
-            f" — each wave output as a separate colour-coded table per question."
+            f" — each wave as a separate colour-coded table per question."
             f"</div>",
             unsafe_allow_html=True
         )
@@ -329,8 +370,8 @@ if st.session_state.scan_done:
         st.info("Select at least one column.")
     else:
         st.markdown(
-            f'<span class="stat-pill">{n_sel} questions</span>'
-            f'<span class="stat-pill">{n_col_sel} columns</span>',
+            f'<span class="stat-pill">{n_sel} questions selected</span>'
+            f'<span class="stat-pill">{n_col_sel} columns selected</span>',
             unsafe_allow_html=True
         )
         st.markdown("<br>", unsafe_allow_html=True)
@@ -340,12 +381,12 @@ if st.session_state.scan_done:
             col_indices     = st.session_state.selected_cols
             col_names       = [g for j,g,s in cols if j in col_indices]
 
-            with st.spinner(f"Building tables..."):
+            with st.spinner("Building tables..."):
                 try:
                     excel_bytes = generate_excel(
                         selected_groups,
                         st.session_state.files,
-                        chosen,
+                        confirmed,
                         col_indices,
                         col_names,
                     )

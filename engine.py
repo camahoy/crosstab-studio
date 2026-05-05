@@ -457,6 +457,140 @@ def _build_toc(wb, toc_entries):
 
 # ── Main export ───────────────────────────────────────────────
 
+def detect_and_describe(file_bytes):
+    """
+    Detect file format and return human-readable structural findings.
+    Returns dict: {matched_profile, findings, sample_columns, n_sheets}
+    findings: list of (key, value, status) tuples — status: ok / warn / info
+    """
+    try:
+        xl       = pd.ExcelFile(io.BytesIO(file_bytes))
+        n_sheets = len(xl.sheet_names)
+    except Exception as e:
+        return {'matched_profile': None, 'findings': [('Error', str(e), 'warn')],
+                'sample_columns': [], 'n_sheets': 0}
+
+    findings = [('Total sheets', str(n_sheets), 'info')]
+
+    # Find first real data sheet
+    ref_si = None
+    for si in range(min(5, n_sheets)):
+        try:
+            df  = xl.parse(si, header=None, nrows=12, na_values=[''])
+            raw = df.values.tolist()
+            c0  = str(raw[2][0]).strip() if len(raw)>2 and raw[2] and raw[2][0] else ''
+            if len(c0) > 5:
+                ref_si = si; ref_raw = raw; break
+        except: continue
+
+    if ref_si is None:
+        return {'matched_profile': None,
+                'findings': findings + [('Data sheets', 'None found', 'warn')],
+                'sample_columns': [], 'n_sheets': n_sheets}
+
+    def cell(r, c):
+        try:
+            v = ref_raw[r][c]
+            return str(v).strip() if v and str(v) not in ('nan','None') else ''
+        except: return ''
+
+    def row_has_total(r):
+        try:
+            return any('total' in str(v).lower()
+                       for v in (ref_raw[r] or [])
+                       if v and str(v) not in ('nan','None'))
+        except: return False
+
+    # Read structural clues
+    r0 = cell(0,0); r1 = cell(1,0); r2 = cell(2,0)
+    r3c0 = cell(3,0); r3c1 = cell(3,1)
+    r4c0 = cell(4,0); r4c1 = cell(4,1)
+    r5c1 = cell(5,1)
+
+    findings.append(('First data sheet', f'Sheet {ref_si} of {n_sheets}', 'info'))
+
+    # Detect Corporate Reputation
+    if (len(r3c0) > 10
+            and ('total sample' in r2.lower() or 'weight' in r2.lower() or (len(r2) > 0 and len(r2) < 50))
+            and ('total' in r4c1.lower() or 'total' in r5c1.lower())):
+
+        q_row  = 3
+        h_row  = 5 if 'total' in r5c1.lower() else 4
+        # Get column names
+        h_data  = ref_raw[h_row] if len(ref_raw) > h_row else []
+        cols    = [str(v).strip() for v in h_data[1:] if v and str(v) not in ('nan','None',' ')]
+
+        # Find base + data start
+        base_row = next((ri for ri in range(6,13)
+                         if len(ref_raw)>ri and ref_raw[ri] and
+                         isinstance(ref_raw[ri][0],str) and
+                         'unweighted' in ref_raw[ri][0].lower()), 8)
+
+        findings += [
+            ('Question wording',    f'Row {q_row}: "{r3c0[:50]}"', 'ok'),
+            ('Descriptor row',      f'Row 2: "{r2[:40]}"', 'ok'),
+            ('Column headers row',  f'Row {h_row}: {cols[:4]}{"..." if len(cols)>4 else ""}', 'ok'),
+            ('Base row',            f'Row {base_row} (Unweighted Base)', 'ok'),
+            ('Data start',          f'Row {base_row+4} (every 3 rows)', 'ok'),
+            ('Value type',          'Percentages as floats (×100 to display)', 'ok'),
+        ]
+        return {'matched_profile': 'Corporate Reputation',
+                'findings': findings, 'sample_columns': cols, 'n_sheets': n_sheets}
+
+    # Detect Global Brand Identity
+    if (len(r2) > 10
+            and ('total' in r3c0.lower() or 'total' in r3c1.lower())
+            and 'total' in r4c1.lower()):
+
+        col_start = 0 if 'total' in r3c0.lower() else 1
+        h_data    = ref_raw[3] if len(ref_raw) > 3 else []
+        cols      = [str(v).strip() for v in h_data[col_start:]
+                     if v and str(v) not in ('nan','None',' ')]
+        sub_data  = ref_raw[4] if len(ref_raw) > 4 else []
+        subs      = [str(v).strip() for v in sub_data[col_start:]
+                     if v and str(v) not in ('nan','None',' ')]
+
+        findings += [
+            ('Question wording',  f'Row 2: "{r2[:50]}"', 'ok'),
+            ('Country headers',   f'Row 3 (col {col_start}+): {cols[:5]}{"..." if len(cols)>5 else ""}', 'ok'),
+            ('Sub-labels row',    f'Row 4: {subs[:4]}{"..." if len(subs)>4 else ""}', 'ok'),
+            ('Base row',          'Row 7 (Unweighted Base)', 'ok'),
+            ('Data start',        'Base row + 2 (every 3 rows)', 'ok'),
+            ('Value type',        'Percentages stored as strings (auto-converted)', 'ok'),
+        ]
+        return {'matched_profile': 'Global Brand Identity',
+                'findings': findings, 'sample_columns': cols, 'n_sheets': n_sheets}
+
+    # Detect KP
+    if len(r2) > 10 and row_has_total(1):
+        h_data = ref_raw[1] if len(ref_raw) > 1 else []
+        cols   = [str(v).strip() for v in h_data
+                  if v and str(v) not in ('nan','None',' ')]
+        findings += [
+            ('Question wording', f'Row 2: "{r2[:50]}"', 'ok'),
+            ('Column headers',   f'Row 1 (finds Total dynamically): {cols[:4]}{"..." if len(cols)>4 else ""}', 'ok'),
+            ('Base row',         'Row 7', 'ok'),
+            ('Data start',       'Dynamic (after base row)', 'ok'),
+            ('Stop marker',      'Total Mentions / Back to Top / Sigma', 'ok'),
+            ('Value type',       'Percentages as floats (×100 to display)', 'ok'),
+        ]
+        return {'matched_profile': 'KP',
+                'findings': findings, 'sample_columns': cols, 'n_sheets': n_sheets}
+
+    # Not recognised
+    findings += [
+        ('Row 0', r0[:50] or '(empty)', 'info'),
+        ('Row 1', r1[:50] or '(empty)', 'info'),
+        ('Row 2', r2[:50] or '(empty)', 'info'),
+        ('Row 3 col 0', r3c0[:40] or '(empty)', 'info'),
+        ('Row 3 col 1', r3c1[:40] or '(empty)', 'info'),
+        ('Row 4 col 1', r4c1[:40] or '(empty)', 'info'),
+        ('Tip', 'Run examine_structure.py in Colab and share the output', 'warn'),
+    ]
+    return {'matched_profile': None,
+            'findings': findings, 'sample_columns': [], 'n_sheets': n_sheets}
+
+
 def generate_excel(selections, files, profile_name, col_indices, col_names):
     """
     Generate formatted Excel output.
