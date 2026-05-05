@@ -4,7 +4,7 @@ Upload-first flow: file detection drives profile selection.
 """
 
 import streamlit as st
-from engine import fast_scan, get_columns, generate_excel, detect_and_describe
+from engine import fast_scan, get_columns, generate_excel, generate_word, detect_and_describe
 from profiles import get_profile_names, get_profile
 
 st.set_page_config(
@@ -376,27 +376,69 @@ if st.session_state.scan_done:
         )
         st.markdown("<br>", unsafe_allow_html=True)
 
-        if st.button(f"◈  Generate Excel ({n_sel} questions)"):
+        # Export format choice
+        export_fmt = st.radio(
+            "Export format",
+            ["Excel", "Media Release Template (Word)"],
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+
+        survey_title = ''
+        if export_fmt == "Media Release Template (Word)":
+            survey_title = st.text_input(
+                "Survey title (appears in document header)",
+                placeholder="e.g. College Student Fall Mental Wellness Survey",
+            )
+
+        btn_label = (
+            f"◈  Generate Excel ({n_sel} questions)"
+            if export_fmt == "Excel"
+            else f"◈  Generate Word ({n_sel} questions)"
+        )
+
+        if st.button(btn_label):
             selected_groups = [g for g in groups if g['prefix'] in st.session_state.selected_qs]
             col_indices     = st.session_state.selected_cols
             col_names       = [g for j,g,s in cols if j in col_indices]
 
             with st.spinner("Building tables..."):
                 try:
-                    excel_bytes = generate_excel(
-                        selected_groups,
-                        st.session_state.files,
-                        confirmed,
-                        col_indices,
-                        col_names,
-                    )
-                    st.success(f"Done — {n_sel} questions exported")
-                    st.download_button(
-                        label="⬇  Download Excel",
-                        data=excel_bytes,
-                        file_name="crosstab_studio_export.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
+                    if export_fmt == "Excel":
+                        result_bytes = generate_excel(
+                            selected_groups,
+                            st.session_state.files,
+                            confirmed,
+                            col_indices,
+                            col_names,
+                        )
+                        st.success(f"Done — {n_sel} questions exported")
+                        st.download_button(
+                            label="⬇  Download Excel",
+                            data=result_bytes,
+                            file_name="crosstab_studio_export.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        )
+                    else:
+                        result_bytes, err = generate_word(
+                            selected_groups,
+                            st.session_state.files,
+                            confirmed,
+                            col_indices,
+                            col_names,
+                            survey_title=survey_title,
+                        )
+                        if err:
+                            st.error(f"Word export failed: {err}")
+                            st.info("Make sure template_doc.docx is in the app root directory.")
+                        else:
+                            st.success(f"Done — {n_sel} questions exported")
+                            st.download_button(
+                                label="⬇  Download Word",
+                                data=result_bytes,
+                                file_name="media_release.docx",
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            )
                 except Exception as e:
                     st.error(f"Export failed: {e}")
                     import traceback; st.code(traceback.format_exc())

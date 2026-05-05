@@ -65,15 +65,41 @@ PROFILES = {
         "question_row":         2,
         "header_row":           1,
         "base_row":             7,
-        "data_start":           None,   # dynamic
+        "data_start":           None,
         "data_step":            3,
         "value_row_offset":     1,
         "skip_sheet_0":         True,
-        "column_start":         "find_total",   # find 'total' in header row
-        "stop_on":              ["total mentions", "total mentions", "back to top", "sigma",
+        "column_start":         "find_total",
+        "stop_on":              ["total mentions", "back to top", "sigma",
                                  "overlap formula used"],
         "coerce_strings":       False,
         "multi_file_mode":      "waves",
+    },
+    "KP Omni": {
+        "description": "KP Omni banner — question at row 4, dynamic base/header detection",
+        "specs": [
+            ("Question row",   "Row 4"),
+            ("Statement row",  "Row 5 (if present, shifts data down by 1)"),
+            ("Column headers", "Dynamic (2 rows above Base Weighted)"),
+            ("Base row",       "Dynamic (finds 'Base Weighted' row)"),
+            ("Data start",     "Dynamic (Base Weighted row + 1)"),
+            ("Data step",      "Every 3 rows"),
+            ("Value row",      "Row offset +1"),
+            ("Stop on",        "Back to Top / Field Dates / Sigma"),
+        ],
+        "question_row":         4,
+        "header_row":           None,    # dynamic
+        "base_row":             None,    # dynamic — finds 'Base Weighted'
+        "data_start":           None,    # dynamic
+        "data_step":            3,
+        "value_row_offset":     1,
+        "skip_sheet_0":         True,
+        "column_start":         1,
+        "stop_on":              ["back to top", "field dates", "sigma",
+                                 "overlap formula used"],
+        "coerce_strings":       False,
+        "multi_file_mode":      "waves",
+        "dynamic_base":         True,    # flag: use dynamic row detection
     },
     "+ Add new format": {
         "description": "coming_soon",
