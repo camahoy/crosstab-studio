@@ -127,13 +127,22 @@ def fast_scan(file_bytes, profile_name):
     order   = []
 
     for i, sname in enumerate(xl.sheet_names):
-        # Skip sheet 0 if it looks like a TOC
+        # Skip sheet 0 if it looks like a TOC/index
         if i == 0 and profile.get("skip_sheet_0"):
             try:
-                df0  = xl.parse(0, header=None, nrows=q_row + 2, na_values=[''])
+                df0  = xl.parse(0, header=None, nrows=max(q_row + 2, 5), na_values=[''])
                 raw0 = df0.values.tolist()
-                c0   = str(raw0[q_row][0]).strip() if len(raw0) > q_row and raw0[q_row] else ''
-                if not c0 or len(c0) < 5: continue
+                # Detect TOC by known header strings in first few rows
+                toc_indicators = ['sheet number', 'table of contents', 'contents', 'index']
+                is_toc = any(
+                    isinstance(raw0[r][0], str) and
+                    any(ind in raw0[r][0].strip().lower() for ind in toc_indicators)
+                    for r in range(min(4, len(raw0)))
+                    if raw0[r] and raw0[r][0]
+                )
+                c0 = str(raw0[q_row][0]).strip() if len(raw0) > q_row and raw0[q_row] and raw0[q_row][0] else ''
+                if is_toc or not c0 or len(c0) < 5:
+                    continue
             except Exception:
                 continue
 
@@ -212,9 +221,10 @@ def get_columns(file_bytes, profile_name):
     profile = PROFILES[profile_name]
     xl      = pd.ExcelFile(io.BytesIO(file_bytes))
     start   = 1 if profile.get("skip_sheet_0") else 0
-    h_row   = profile["header_row"]
+    h_row   = profile["header_row"]  # may be None for KP Omni
     s_row   = profile.get("sublabel_row", h_row)
-    nrows   = max(h_row, s_row) + 2
+    # For dynamic profiles, nrows will be set after reading the file
+    nrows   = max(h_row or 20, s_row or 20) + 2
 
     for i in range(start, min(start + 10, len(xl.sheet_names))):
         try:
@@ -697,17 +707,23 @@ def detect_and_describe(file_bytes):
     findings = [('Total sheets', str(n_sheets), 'info')]
 
     ref_si = None
-    for si in range(min(5, n_sheets)):
+    for si in range(min(6, n_sheets)):
         try:
             df  = xl.parse(si, header=None, nrows=20, na_values=[''])
             raw = df.values.tolist()
-            c0  = str(raw[2][0]).strip() if len(raw)>2 and raw[2] and raw[2][0] else ''
-            if len(c0) > 5 and not c0.lower().startswith('table'):
-                ref_si = si; ref_raw = raw; break
-            # For KP Omni: row 2 is "Table N", row 4 is question
+
+            # Skip if this looks like a TOC/index (short strings, no question wording)
+            c2 = str(raw[2][0]).strip() if len(raw)>2 and raw[2] and raw[2][0] else ''
             c4 = str(raw[4][0]).strip() if len(raw)>4 and raw[4] and raw[4][0] else ''
-            if c0.lower().startswith('table') and len(c4) > 10:
+
+            # KP Omni: row 2 = "Table N", row 4 = real question wording
+            if c2.lower().startswith('table ') and len(c4) > 10:
                 ref_si = si; ref_raw = raw; break
+
+            # Other formats: row 2 has real question wording (long string)
+            if len(c2) > 10 and not c2.lower().startswith('sheet') and not c2.lower().startswith('table'):
+                ref_si = si; ref_raw = raw; break
+
         except: continue
 
     if ref_si is None:
