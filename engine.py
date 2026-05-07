@@ -691,39 +691,132 @@ def _write_word_table(doc, insert_after_para, question_wording,
 
 
 def generate_word(selections, files, profile_name, col_indices, col_names,
-                  survey_title=''):
-    import os
-    if not os.path.exists(TEMPLATE_PATH):
-        return None, "template_doc.docx not found in app directory"
+                  survey_title='', portrait_landscape=False):
+    """
+    Generate Word doc using the KP Ipsos topline template from Google Drive,
+    then append tables exactly like the original Colab script.
+    portrait_landscape=False → landscape (default), True → portrait
+    """
+    import requests, tempfile
+    from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-    doc = Document(TEMPLATE_PATH)
+    # Download template from Google Drive — same as Colab script
+    PORTRAIT_ID  = '15Wd-lWQU0myOOztDZof0wr2e6smUU_sq'
+    LANDSCAPE_ID = '1qqcZHvPe3NhskKP4HOscm-uIcaUC500L'
+    doc_id   = PORTRAIT_ID if portrait_landscape else LANDSCAPE_ID
+    url      = f"https://drive.google.com/uc?id={doc_id}"
 
-    title_para = doc.paragraphs[1]
-    for run in title_para.runs:
-        run.text = ''
-    if title_para.runs:
-        title_para.runs[0].text = survey_title or 'Topline Findings'
-    else:
-        _add_run(title_para, survey_title or 'Topline Findings',
-                 bold=True, color=BRAND_COLOR)
+    try:
+        response = requests.get(url, timeout=15)
+        response.raise_for_status()
+        tmp = tempfile.NamedTemporaryFile(suffix='.docx', delete=False)
+        tmp.write(response.content)
+        tmp.close()
+        doc = Document(tmp.name)
+        os.unlink(tmp.name)
+    except Exception as e:
+        # Fallback: blank doc with Arial 10pt
+        doc = Document()
 
-    topline_para = next(
-        (p for p in doc.paragraphs if 'Topline' in p.text), doc.paragraphs[-1]
-    )
-    insert_after = topline_para
+    # Set Normal style to Arial 10pt
+    style = doc.styles['Normal']
+    style.font.name = 'Arial'
+    style.font.size = Pt(10)
+
+    def _round(n):
+        return math.floor(n) if n - math.floor(n) < 0.5 else math.ceil(n)
+
+    def _fmt_n(v):
+        if v is None: return ''
+        try:
+            f = float(v)
+            if math.isnan(f): return ''
+            return str(int(round(f)))
+        except: return str(v)
+
+    first_table = True
 
     for sel in selections:
-        prefix  = sel['prefix']
+        prefix = sel['prefix']
         for fi, finfo in enumerate(files):
-            p = _find_and_parse(finfo['bytes'], prefix, profile_name, col_indices)
-            if p is None or not p['answers']: continue
-            title = f"{p['wording']}  —  {finfo['label']}" if len(files) > 1 else p['wording']
-            tbl_el = _write_word_table(doc, insert_after, title,
-                                       col_names, p['base_vals'],
-                                       p['answers'], p['values'])
-            spacer_el = OxmlElement('w:p')
-            tbl_el.addnext(spacer_el)
-            insert_after = DocxPara(spacer_el, topline_para._parent)
+            parsed = _find_and_parse(finfo['bytes'], prefix, profile_name, col_indices)
+            if parsed is None or not parsed['answers']:
+                continue
+
+            wording = parsed['wording']
+            if len(files) > 1:
+                wording = f"{wording}  —  {finfo['label']}"
+
+            # Detect multiple from first real value
+            multiple = 100
+            for row in parsed['values']:
+                for v in row:
+                    if isinstance(v, (int, float)) and not (isinstance(v, float) and math.isnan(v)):
+                        multiple = 1 if float(v) > 1.0 else 100
+                        break
+                else:
+                    continue
+                break
+
+            # Blank line between tables
+            if not first_table:
+                doc.add_paragraph()
+            first_table = False
+
+            # Question wording paragraph
+            q_para       = doc.add_paragraph()
+            q_para.style = doc.styles['Normal']
+            q_para.text  = wording
+
+            # Table
+            n_cols = len(col_names)
+            tbl               = doc.add_table(rows=1, cols=n_cols + 1)
+            tbl.style         = 'Table Grid'
+            tbl.alignment     = WD_TABLE_ALIGNMENT.CENTER
+            tbl.allow_autofit = True
+
+            # Header row
+            hdr = tbl.rows[0].cells
+            hdr[0].text = ''
+            for ci, col_name in enumerate(col_names):
+                bv  = parsed['base_vals'][ci] if ci < len(parsed['base_vals']) else None
+                hdr[ci+1].text = ''
+                run = hdr[ci+1].paragraphs[0].add_run(
+                    f"{col_name}\n(N={_fmt_n(bv)})"
+                )
+                run.bold = True
+                hdr[ci+1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+            # Data rows
+            for ri, answer in enumerate(parsed['answers']):
+                if str(answer).strip().lower() == 'sigma':
+                    continue
+                row_cells = tbl.add_row().cells
+                row_vals  = parsed['values'][ri] if ri < len(parsed['values']) else []
+                row_cells[0].text = str(answer)
+
+                for ci in range(n_cols):
+                    v    = row_vals[ci] if ci < len(row_vals) else None
+                    cell = row_cells[ci + 1]
+                    cell.text = ''
+                    if v is None or (isinstance(v, float) and math.isnan(v)):
+                        pass
+                    elif isinstance(v, str):
+                        cell.paragraphs[0].add_run(str(v))
+                        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    else:
+                        val = _round(round(float(v) * multiple, 3))
+                        cell.paragraphs[0].add_run(f"{val}%")
+                        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+            # Column widths — matches Colab script
+            for ci in range(n_cols + 1):
+                for cell in tbl.columns[ci].cells:
+                    cell.width = Inches(3) if ci == 0 else Inches(1.75)
+                    if ci > 0:
+                        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
     buf = io.BytesIO()
     doc.save(buf)

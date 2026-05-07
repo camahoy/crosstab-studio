@@ -391,11 +391,16 @@ if st.session_state.scan_done:
             label_visibility="collapsed",
         )
 
-        survey_title = ''
+        survey_title      = ''
+        portrait_landscape = False
         if export_fmt == "Media Release Template (Word)":
             survey_title = st.text_input(
                 "Survey title (appears in document header)",
                 placeholder="e.g. College Student Fall Mental Wellness Survey",
+            )
+            portrait_landscape = st.checkbox(
+                "Portrait orientation (default is landscape)",
+                value=False,
             )
 
         btn_label = (
@@ -434,6 +439,7 @@ if st.session_state.scan_done:
                             col_indices,
                             col_names,
                             survey_title=survey_title,
+                            portrait_landscape=portrait_landscape,
                         )
                         if err:
                             st.error(f"Word export failed: {err}")
