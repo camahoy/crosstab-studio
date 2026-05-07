@@ -101,7 +101,7 @@ PROFILES = {
         "multi_file_mode":      "waves",
         "dynamic_base":         True,    # flag: use dynamic row detection
     },
-    "GQR Standard": {
+    "IData": {
         "description": "GQR standard banner — question at row 2, group headers at row 3, categories at row 4",
         "specs": [
             ("Question row",   "Row 2"),

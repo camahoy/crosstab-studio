@@ -115,7 +115,7 @@ def validate_format(file_bytes):
                     ('Data start',      'Row 9 (every 3 rows)', 'ok'),
                     ('Value type',      'Floats 0-1 (×100 for %)', 'ok'),
                 ]
-                return {'matched_profile': 'GQR Standard',
+                return {'matched_profile': 'IData',
                         'findings': findings, 'sample_columns': cols, 'n_sheets': n_sheets}
 
     # KP Omni: row 1=project name, row 2="Table N", row 4=question
@@ -587,12 +587,27 @@ def _find_and_parse(file_bytes, prefix, profile_name, col_indices):
     return parse_sheet(file_bytes, match['sheets'][0], profile_name, col_indices)
 
 
-def _find_and_parse_all(file_bytes, prefix, profile_name, col_indices):
+def _classify_sheet_type(wording):
+    """Return sheet type string based on wording."""
+    wl = wording.lower()
+    if 't2b' in wl or 'top 2 box' in wl:       return 't2b'
+    if 'b2b' in wl or 'bottom 2 box' in wl:     return 'b2b'
+    if 'mean' in wl or 'average' in wl:          return 'mean'
+    if 'summary grid' in wl or 'grid' in wl:     return 'grid'
+    return 'standard'
+
+
+def _find_and_parse_all(file_bytes, prefix, profile_name, col_indices,
+                        include_types=None):
     """
     Parse ALL sheets for a prefix.
-    Returns list of parsed dicts, one per sheet.
-    Separates summary sheets (T2B, B2B, Mean) from statement sheets.
+    include_types: set of type strings to include e.g. {'standard','t2b','b2b','grid'}
+                   None = include all
+    Returns (statement_sheets, t2b_parsed, b2b_parsed)
     """
+    if include_types is None:
+        include_types = {'standard', 't2b', 'b2b', 'mean', 'grid'}
+
     groups = fast_scan(file_bytes, profile_name)
     match  = next((g for g in groups if g['prefix'] == prefix), None)
     if match is None: return [], None, None
@@ -605,20 +620,22 @@ def _find_and_parse_all(file_bytes, prefix, profile_name, col_indices):
         p = parse_sheet(file_bytes, si, profile_name, col_indices)
         if not p or not p['answers']:
             continue
-        wording_lower = p['wording'].lower()
-        if 't2b' in wording_lower or 'top 2 box' in wording_lower:
+        stype = _classify_sheet_type(p['wording'])
+        if stype not in include_types:
+            continue
+        if stype == 't2b':
             t2b_parsed = p
-        elif 'b2b' in wording_lower or 'bottom 2 box' in wording_lower:
+        elif stype == 'b2b':
             b2b_parsed = p
-        elif 'mean' in wording_lower or 'average' in wording_lower:
-            pass   # skip mean for now
+        elif stype == 'mean':
+            pass   # mean handled separately if needed
         else:
             statement_sheets.append(p)
 
     return statement_sheets, t2b_parsed, b2b_parsed
 
 
-def generate_excel(selections, files, profile_name, col_indices, col_names):
+def generate_excel(selections, files, profile_name, col_indices, col_names, include_types=None):
     wb          = openpyxl.Workbook()
     wb.remove(wb.active)
     toc_entries = []
@@ -637,7 +654,8 @@ def generate_excel(selections, files, profile_name, col_indices, col_names):
 
         for fi, finfo in enumerate(files):
             statements, t2b_parsed, b2b_parsed = _find_and_parse_all(
-                finfo['bytes'], prefix, profile_name, col_indices)
+                finfo['bytes'], prefix, profile_name, col_indices,
+                include_types=include_types)
             if not statements:
                 p = _find_and_parse(finfo['bytes'], prefix, profile_name, col_indices)
                 if p and p['answers']:
@@ -784,7 +802,7 @@ def _write_word_table(doc, insert_after_para, question_wording,
 
 
 def generate_word(selections, files, profile_name, col_indices, col_names,
-                  survey_title='', portrait_landscape=False):
+                  survey_title='', portrait_landscape=False, include_types=None):
     """
     Generate Word doc using the KP Ipsos topline template from Google Drive,
     then append tables exactly like the original Colab script.
@@ -836,22 +854,20 @@ def generate_word(selections, files, profile_name, col_indices, col_names,
         from docx.oxml import OxmlElement
         from docx.oxml.ns import qn
 
-        def _set_top_border(row_el):
-            """Add a 1pt top border to all cells in this row."""
-            for tc in row_el.findall(
-                    './/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc'):
-                tcPr = tc.find(
-                    '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tcPr')
-                if tcPr is None:
-                    tcPr = OxmlElement('w:tcPr')
-                    tc.insert(0, tcPr)
-                tcBdr = OxmlElement('w:tcBorders')
-                top   = OxmlElement('w:top')
-                top.set(qn('w:val'),   'single')
-                top.set(qn('w:sz'),    '8')   # 1pt = 8 eighths of a point
-                top.set(qn('w:color'), '000000')
-                tcBdr.append(top)
-                tcPr.append(tcBdr)
+        def _set_top_border(tc):
+            """Add a 1pt top border to a single cell (_tc element)."""
+            ns   = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+            tcPr = tc.find(f'{{{ns}}}tcPr')
+            if tcPr is None:
+                tcPr = OxmlElement('w:tcPr')
+                tc.insert(0, tcPr)
+            tcBdr = OxmlElement('w:tcBorders')
+            top   = OxmlElement('w:top')
+            top.set(qn('w:val'),   'single')
+            top.set(qn('w:sz'),    '8')
+            top.set(qn('w:color'), '000000')
+            tcBdr.append(top)
+            tcPr.append(tcBdr)
 
         def _add_separator_border(row_el):
             """Add 1pt top border to all cells in a Word table row."""
@@ -891,7 +907,8 @@ def generate_word(selections, files, profile_name, col_indices, col_names,
                     cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
             if add_top_border:
-                _set_top_border(row_cells[0]._tr)
+                for cell in row_cells:
+                    _set_top_border(cell._tc)
             return row_cells
 
         # Regular answer rows — T2B/B2B already at end via parse_sheet
@@ -1112,7 +1129,7 @@ def detect_and_describe(file_bytes):
                 ('Base row',         f'Row 7: "{_r7c0[:30]}"', 'ok'),
                 ('Data start',       'Row 9 (every 3 rows)', 'ok'),
             ]
-            return {'matched_profile': 'GQR Standard',
+            return {'matched_profile': 'IData',
                     'findings': findings, 'sample_columns': cols, 'n_sheets': n_sheets}
 
     # Corporate Reputation
