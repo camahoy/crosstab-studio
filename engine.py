@@ -238,8 +238,8 @@ def get_columns(file_bytes, profile_name):
                 s_row  = h_row
                 nrows  = (bw_row + 1) if bw_row is not None else 16
 
-            hrow = raw[h_row] if len(raw) > h_row else []
-            srow = raw[s_row] if len(raw) > s_row and s_row != h_row else []
+            hrow = raw[h_row] if h_row is not None and len(raw) > h_row else []
+            srow = raw[s_row] if s_row is not None and len(raw) > s_row and s_row != h_row else []
 
             col_start = profile.get("column_start", 1)
 
@@ -811,11 +811,11 @@ def detect_and_describe(file_bytes):
 
     # KP
     if len(r2) > 10 and row_has_total(1):
-        h_data = ref_raw[1] if len(ref_raw) > 1 else []
-        cols   = [str(v).strip() for v in h_data if v and str(v) not in ('nan','None','\xa0')]
+        h_data = ref_raw[4] if len(ref_raw) > 4 else []
+        cols   = [str(v).strip() for v in h_data[1:] if v and str(v) not in ('nan','None','\xa0')]
         findings += [
             ('Question wording', f'Row 2: "{r2[:50]}"', 'ok'),
-            ('Column headers',   f'Row 1: {cols[:4]}', 'ok'),
+            ('Column headers',   f'Row 4: {cols[:4]}', 'ok'),
             ('Base row',         'Row 7', 'ok'),
             ('Data start',       'Dynamic (after base row)', 'ok'),
         ]
