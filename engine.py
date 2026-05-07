@@ -383,6 +383,8 @@ def parse_sheet(file_bytes, sheet_idx, profile_name, col_indices):
     stop_on = set(s.lower() for s in profile.get("stop_on", ["sigma"]))
 
     answers, values, sig_data = [], [], []
+    net_answers, net_values, net_sig = [], [], []   # (Net) rows go last
+
     i = data_start
     while i < len(raw):
         lbl = raw[i][0] if raw[i] else None
@@ -393,22 +395,38 @@ def parse_sheet(file_bytes, sheet_idx, profile_name, col_indices):
                                                'base =', 'weighted base', 'base unweighted',
                                                'upper case', 'lower case', 'field dates')):
                 i += 1; continue
-            answers.append(lbl.strip())
-            val_row = raw[i + val_off] if i + val_off < len(raw) else []
-            sig_row = raw[i + 2]       if i + 2       < len(raw) else []
-            values.append([_coerce(val_row[j] if j < len(val_row) else None) for j in col_indices])
-            sig_data.append([sig_row[j] if j < len(sig_row) else None for j in col_indices])
+            val_row  = raw[i + val_off] if i + val_off < len(raw) else []
+            sig_row  = raw[i + 2]       if i + 2       < len(raw) else []
+            row_vals = [_coerce(val_row[j] if j < len(val_row) else None) for j in col_indices]
+            row_sigs = [sig_row[j] if j < len(sig_row) else None for j in col_indices]
+
+            # (Net) rows go to bottom bucket, everything else stays in order
+            if '(net)' in cl:
+                net_answers.append(lbl.strip())
+                net_values.append(row_vals)
+                net_sig.append(row_sigs)
+            else:
+                answers.append(lbl.strip())
+                values.append(row_vals)
+                sig_data.append(row_sigs)
             i += step
             continue
         i += 1
 
+    # Net rows appended at end in their original order
+    net_start_idx = len(answers)
+    answers  += net_answers
+    values   += net_values
+    sig_data += net_sig
+
     return {
-        'wording':   wording,
-        'statement': statement,
-        'base_vals': base_vals,
-        'answers':   answers,
-        'values':    values,
-        'sig_data':  sig_data,
+        'wording':       wording,
+        'statement':     statement,
+        'base_vals':     base_vals,
+        'answers':       answers,
+        'values':        values,
+        'sig_data':      sig_data,
+        'net_start_idx': net_start_idx,   # index where Net rows begin
     }
 
 # ── Excel styles ──────────────────────────────────────────────
@@ -439,7 +457,7 @@ def _fmt_pct(v):
 
 
 def _write_table(ws, row, wording, col_headers, base_vals,
-                 answers, values, wave_idx=None):
+                 answers, values, wave_idx=None, net_start_idx=None):
     n_cols = len(col_headers)
 
     # Title
@@ -466,18 +484,34 @@ def _write_table(ws, row, wording, col_headers, base_vals,
         cell.border    = BORDER
     row += 1
 
+    # Separator border style for T2B row
+    SEP_THIN   = Side(style="thin",   color="000000")
+    SEP_BORDER = Border(left=THIN, right=THIN, bottom=THIN, top=SEP_THIN)
+
     # Data rows
     for ri, answer in enumerate(answers):
-        fill = ALT_FILL if ri % 2 == 0 else PatternFill()
+        is_summary = (net_start_idx is not None and ri >= net_start_idx)
+        fill = ALT_FILL if (ri % 2 == 0 and not is_summary) else PatternFill()
+        bold = is_summary
+
+        # Use separator border on first T2B row
+        use_border = SEP_BORDER if (net_start_idx is not None and ri == net_start_idx) else BORDER
+
         lc = ws.cell(row=row, column=1, value=str(answer))
-        lc.font=BODY_FONT; lc.alignment=LEFT; lc.border=BORDER; lc.fill=fill
+        lc.font      = XLFont(bold=bold, name="Arial", size=10)
+        lc.alignment = LEFT
+        lc.border    = use_border
+        lc.fill      = fill
+
         row_vals = values[ri] if ri < len(values) else []
         for ci in range(n_cols):
             v    = row_vals[ci] if ci < len(row_vals) else None
             cell = ws.cell(row=row, column=ci + 2)
-            cell.font=BODY_FONT; cell.alignment=CTR
-            cell.border=BORDER;  cell.fill=fill
-            cell.value = _fmt_pct(v)
+            cell.font      = XLFont(bold=bold, name="Arial", size=10)
+            cell.alignment = CTR
+            cell.border    = use_border
+            cell.fill      = fill
+            cell.value     = _fmt_pct(v)
         row += 1
 
     ws.column_dimensions['A'].width = max(ws.column_dimensions['A'].width, 42)
@@ -546,10 +580,42 @@ def _build_toc(wb, toc_entries):
 
 
 def _find_and_parse(file_bytes, prefix, profile_name, col_indices):
+    """Parse first sheet for a prefix — used for single-sheet questions."""
     groups = fast_scan(file_bytes, profile_name)
     match  = next((g for g in groups if g['prefix'] == prefix), None)
     if match is None: return None
     return parse_sheet(file_bytes, match['sheets'][0], profile_name, col_indices)
+
+
+def _find_and_parse_all(file_bytes, prefix, profile_name, col_indices):
+    """
+    Parse ALL sheets for a prefix.
+    Returns list of parsed dicts, one per sheet.
+    Separates summary sheets (T2B, B2B, Mean) from statement sheets.
+    """
+    groups = fast_scan(file_bytes, profile_name)
+    match  = next((g for g in groups if g['prefix'] == prefix), None)
+    if match is None: return [], None, None
+
+    statement_sheets = []
+    t2b_parsed       = None
+    b2b_parsed       = None
+
+    for si in match['sheets']:
+        p = parse_sheet(file_bytes, si, profile_name, col_indices)
+        if not p or not p['answers']:
+            continue
+        wording_lower = p['wording'].lower()
+        if 't2b' in wording_lower or 'top 2 box' in wording_lower:
+            t2b_parsed = p
+        elif 'b2b' in wording_lower or 'bottom 2 box' in wording_lower:
+            b2b_parsed = p
+        elif 'mean' in wording_lower or 'average' in wording_lower:
+            pass   # skip mean for now
+        else:
+            statement_sheets.append(p)
+
+    return statement_sheets, t2b_parsed, b2b_parsed
 
 
 def generate_excel(selections, files, profile_name, col_indices, col_names):
@@ -569,24 +635,51 @@ def generate_excel(selections, files, profile_name, col_indices, col_names):
         ws  = wb[sheet_nm]
         row = 1 if ws.max_row <= 1 else ws.max_row + 2
 
-        if len(files) == 1:
-            p = _find_and_parse(files[0]['bytes'], prefix, profile_name, col_indices)
-            if p and p['answers']:
-                row = _write_table(ws, row, p['wording'], col_names,
-                                   p['base_vals'], p['answers'], p['values'])
-        else:
-            title_cell = ws.cell(row=row, column=1, value=wording[:100])
-            title_cell.font      = XLFont(bold=True, name="Arial", size=12, color="0F2D4A")
-            title_cell.alignment = LEFT
-            ws.merge_cells(start_row=row, start_column=1,
-                           end_row=row, end_column=len(col_names) + 1)
-            row += 2
-
-            for fi, finfo in enumerate(files):
+        for fi, finfo in enumerate(files):
+            statements, t2b_parsed, b2b_parsed = _find_and_parse_all(
+                finfo['bytes'], prefix, profile_name, col_indices)
+            if not statements:
                 p = _find_and_parse(finfo['bytes'], prefix, profile_name, col_indices)
-                if p is None or not p['answers']: continue
-                row = _write_table(ws, row, finfo['label'], col_names,
-                                   p['base_vals'], p['answers'], p['values'], wave_idx=fi)
+                if p and p['answers']:
+                    statements = [p]
+            if not statements:
+                continue
+
+            wave_idx = fi if len(files) > 1 else None
+
+            for parsed in statements:
+                tbl_title = parsed['wording']
+                if len(files) > 1:
+                    tbl_title = f"{finfo['label']} — {parsed['wording']}"
+
+                # Build answers/values with T2B and B2B appended
+                answers = list(parsed['answers'])
+                values  = list(parsed['values'])
+
+                # Add T2B
+                if t2b_parsed and t2b_parsed['answers']:
+                    stmt = parsed.get('statement', '')
+                    for ai, ans in enumerate(t2b_parsed['answers']):
+                        if (stmt and stmt.lower() in ans.lower()) or ai == 0:
+                            t2b_vals = t2b_parsed['values'][ai] if ai < len(t2b_parsed['values']) else []
+                            answers.append('Top 2 Box')
+                            values.append(t2b_vals)
+                            break
+
+                # Add B2B
+                if b2b_parsed and b2b_parsed['answers']:
+                    stmt = parsed.get('statement', '')
+                    for ai, ans in enumerate(b2b_parsed['answers']):
+                        if (stmt and stmt.lower() in ans.lower()) or ai == 0:
+                            b2b_vals = b2b_parsed['values'][ai] if ai < len(b2b_parsed['values']) else []
+                            answers.append('Bottom 2 Box')
+                            values.append(b2b_vals)
+                            break
+
+                row = _write_table(ws, row, tbl_title, col_names,
+                                   parsed['base_vals'], answers, values,
+                                   wave_idx=wave_idx,
+                                   net_start_idx=parsed.get('net_start_idx'))
 
     if toc_entries:
         _build_toc(wb, toc_entries)
@@ -737,86 +830,177 @@ def generate_word(selections, files, profile_name, col_indices, col_names,
 
     first_table = True
 
+    def _add_data_rows(tbl, parsed, multiple, n_cols,
+                       t2b_parsed=None, b2b_parsed=None):
+        """Add answer rows to table, then T2B and B2B if available."""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        def _set_top_border(row_el):
+            """Add a 1pt top border to all cells in this row."""
+            for tc in row_el.findall(
+                    './/{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tc'):
+                tcPr = tc.find(
+                    '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tcPr')
+                if tcPr is None:
+                    tcPr = OxmlElement('w:tcPr')
+                    tc.insert(0, tcPr)
+                tcBdr = OxmlElement('w:tcBorders')
+                top   = OxmlElement('w:top')
+                top.set(qn('w:val'),   'single')
+                top.set(qn('w:sz'),    '8')   # 1pt = 8 eighths of a point
+                top.set(qn('w:color'), '000000')
+                tcBdr.append(top)
+                tcPr.append(tcBdr)
+
+        def _add_separator_border(row_el):
+            """Add 1pt top border to all cells in a Word table row."""
+            ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+            for tc in row_el.findall(f'{{{ns}}}tc'):
+                tcPr = tc.find(f'{{{ns}}}tcPr')
+                if tcPr is None:
+                    tcPr = OxmlElement('w:tcPr')
+                    tc.insert(0, tcPr)
+                tcBdr = OxmlElement('w:tcBorders')
+                top   = OxmlElement('w:top')
+                top.set(qn('w:val'),   'single')
+                top.set(qn('w:sz'),    '8')
+                top.set(qn('w:color'), '000000')
+                tcBdr.append(top)
+                tcPr.append(tcBdr)
+
+        def _write_row(tbl, label, vals, multiple, n_cols, bold=False, add_top_border=False):
+            row_cells = tbl.add_row().cells
+            row_cells[0].text = ''
+            run0 = row_cells[0].paragraphs[0].add_run(str(label))
+            run0.bold = bold
+            for ci in range(n_cols):
+                v    = vals[ci] if ci < len(vals) else None
+                cell = row_cells[ci + 1]
+                cell.text = ''
+                if v is None or (isinstance(v, float) and math.isnan(v)):
+                    pass
+                elif isinstance(v, str):
+                    run = cell.paragraphs[0].add_run(str(v))
+                    run.bold = bold
+                    cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                else:
+                    val = _round(round(float(v) * multiple, 3))
+                    run = cell.paragraphs[0].add_run(f"{val}%")
+                    run.bold = bold
+                    cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            if add_top_border:
+                _set_top_border(row_cells[0]._tr)
+            return row_cells
+
+        # Regular answer rows — T2B/B2B already at end via parse_sheet
+        t2b_start = parsed.get('net_start_idx', len(parsed['answers']))
+        for ri, answer in enumerate(parsed['answers']):
+            if str(answer).strip().lower() == 'sigma':
+                continue
+            row_vals       = parsed['values'][ri] if ri < len(parsed['values']) else []
+            is_summary     = ri >= t2b_start
+            add_border     = (ri == t2b_start) and is_summary
+            _write_row(tbl, answer, row_vals, multiple, n_cols,
+                       bold=is_summary, add_top_border=add_border)
+
+        # External T2B/B2B from summary sheets (only if not already in sheet)
+        if t2b_parsed and t2b_parsed['answers'] and not parsed.get('net_start_idx'):
+            # Find matching answer — T2B sheet has one row per statement
+            # We want the row that matches this statement
+            t2b_val = None
+            stmt = parsed.get('statement', '')
+            for ai, ans in enumerate(t2b_parsed['answers']):
+                if (stmt and stmt.lower() in ans.lower()) or ai == 0:
+                    t2b_val = t2b_parsed['values'][ai] if ai < len(t2b_parsed['values']) else []
+                    break
+            if t2b_val is not None:
+                _write_row(tbl, 'Top 2 Box', t2b_val, multiple, n_cols,
+                           bold=True, add_top_border=True)
+
+        # B2B row (no separator — immediately after T2B)
+        if b2b_parsed and b2b_parsed['answers']:
+            b2b_val = None
+            stmt = parsed.get('statement', '')
+            for ai, ans in enumerate(b2b_parsed['answers']):
+                if (stmt and stmt.lower() in ans.lower()) or ai == 0:
+                    b2b_val = b2b_parsed['values'][ai] if ai < len(b2b_parsed['values']) else []
+                    break
+            if b2b_val is not None:
+                _write_row(tbl, 'Bottom 2 Box', b2b_val, multiple, n_cols, bold=True)
+
     for sel in selections:
         prefix = sel['prefix']
         for fi, finfo in enumerate(files):
-            parsed = _find_and_parse(finfo['bytes'], prefix, profile_name, col_indices)
-            if parsed is None or not parsed['answers']:
-                continue
+            # Get all sheets for this prefix
+            statements, t2b_parsed, b2b_parsed = _find_and_parse_all(
+                finfo['bytes'], prefix, profile_name, col_indices)
 
-            wording = parsed['wording']
-            if len(files) > 1:
-                wording = f"{wording}  —  {finfo['label']}"
+            # If no statement sheets found, try single parse as fallback
+            if not statements:
+                p = _find_and_parse(finfo['bytes'], prefix, profile_name, col_indices)
+                if p and p['answers']:
+                    statements = [p]
+
+            if not statements:
+                continue
 
             # Detect multiple from first real value
             multiple = 100
-            for row in parsed['values']:
-                for v in row:
-                    if isinstance(v, (int, float)) and not (isinstance(v, float) and math.isnan(v)):
-                        multiple = 1 if float(v) > 1.0 else 100
-                        break
-                else:
-                    continue
+            for p in statements:
+                for row in p['values']:
+                    for v in row:
+                        if isinstance(v, (int, float)) and not (isinstance(v, float) and math.isnan(v)):
+                            multiple = 1 if float(v) > 1.0 else 100
+                            break
+                    else:
+                        continue
+                    break
                 break
 
-            # Blank line between tables
-            if not first_table:
-                doc.add_paragraph()
-            first_table = False
+            # One table per statement sheet
+            for parsed in statements:
+                wording = parsed['wording']
+                if len(files) > 1:
+                    wording = f"{wording}  —  {finfo['label']}"
 
-            # Question wording paragraph
-            q_para       = doc.add_paragraph()
-            q_para.style = doc.styles['Normal']
-            q_para.text  = wording
+                # Blank line between tables
+                if not first_table:
+                    doc.add_paragraph()
+                first_table = False
 
-            # Table
-            n_cols = len(col_names)
-            tbl               = doc.add_table(rows=1, cols=n_cols + 1)
-            tbl.style         = 'Table Grid'
-            tbl.alignment     = WD_TABLE_ALIGNMENT.CENTER
-            tbl.allow_autofit = True
+                # Question wording paragraph
+                q_para       = doc.add_paragraph()
+                q_para.style = doc.styles['Normal']
+                q_para.text  = wording
 
-            # Header row
-            hdr = tbl.rows[0].cells
-            hdr[0].text = ''
-            for ci, col_name in enumerate(col_names):
-                bv  = parsed['base_vals'][ci] if ci < len(parsed['base_vals']) else None
-                hdr[ci+1].text = ''
-                run = hdr[ci+1].paragraphs[0].add_run(
-                    f"{col_name}\n(N={_fmt_n(bv)})"
-                )
-                run.bold = True
-                hdr[ci+1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                # Table
+                n_cols = len(col_names)
+                tbl               = doc.add_table(rows=1, cols=n_cols + 1)
+                tbl.style         = 'Table Grid'
+                tbl.alignment     = WD_TABLE_ALIGNMENT.CENTER
+                tbl.allow_autofit = True
 
-            # Data rows
-            for ri, answer in enumerate(parsed['answers']):
-                if str(answer).strip().lower() == 'sigma':
-                    continue
-                row_cells = tbl.add_row().cells
-                row_vals  = parsed['values'][ri] if ri < len(parsed['values']) else []
-                row_cells[0].text = str(answer)
+                # Header row
+                hdr = tbl.rows[0].cells
+                hdr[0].text = ''
+                for ci, col_name in enumerate(col_names):
+                    bv  = parsed['base_vals'][ci] if ci < len(parsed['base_vals']) else None
+                    hdr[ci+1].text = ''
+                    run = hdr[ci+1].paragraphs[0].add_run(f"{col_name}\n(N={_fmt_n(bv)})")
+                    run.bold = True
+                    hdr[ci+1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-                for ci in range(n_cols):
-                    v    = row_vals[ci] if ci < len(row_vals) else None
-                    cell = row_cells[ci + 1]
-                    cell.text = ''
-                    if v is None or (isinstance(v, float) and math.isnan(v)):
-                        pass
-                    elif isinstance(v, str):
-                        cell.paragraphs[0].add_run(str(v))
-                        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    else:
-                        val = _round(round(float(v) * multiple, 3))
-                        cell.paragraphs[0].add_run(f"{val}%")
-                        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                # Data rows + T2B + B2B
+                _add_data_rows(tbl, parsed, multiple, n_cols, t2b_parsed, b2b_parsed)
 
-            # Column widths — matches Colab script
-            for ci in range(n_cols + 1):
-                for cell in tbl.columns[ci].cells:
-                    cell.width = Inches(3) if ci == 0 else Inches(1.75)
-                    if ci > 0:
-                        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                # Column widths
+                for ci in range(n_cols + 1):
+                    for cell in tbl.columns[ci].cells:
+                        cell.width = Inches(3) if ci == 0 else Inches(1.75)
+                        if ci > 0:
+                            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
     buf = io.BytesIO()
     doc.save(buf)
