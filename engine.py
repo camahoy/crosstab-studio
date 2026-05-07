@@ -88,6 +88,36 @@ def validate_format(file_bytes):
                 and 'total' in r4c1.lower()):
             return "Global Brand Identity", 90
 
+    # GQR Standard: row 0=project ID, row 2=question, row 4 col 1=Total,
+    # row 7=Base: Total Answering
+    if len(raw) > 7:
+        r0   = cell(0, 0)
+        r2   = cell(2, 0)
+        r4c1 = cell(4, 1)
+        r7c0 = cell(7, 0)
+        if (len(r2) > 10
+                and 'total' in r4c1.lower()
+                and r7c0.lower().startswith('base')
+                and len(r0) > 5):
+            # Make sure it's not Corporate Reputation (which has descriptor at row 2)
+            r3c0 = cell(3, 0)
+            if not (len(r3c0) > 10):   # row 3 col 0 is blank/group header not a question
+                h_data = raw[4] if len(raw) > 4 else []
+                cols   = [str(v).strip() for v in h_data[1:]
+                          if isinstance(v, str) and v.strip() and v.strip() not in (' ',)
+                          and len(v.strip()) > 1]
+                findings += [
+                    ('Project ID',      f'Row 0: "{r0[:40]}"', 'ok'),
+                    ('Question wording',f'Row 2: "{r2[:55]}"', 'ok'),
+                    ('Group headers',   f'Row 3 (Gender, Race, Class...)', 'ok'),
+                    ('Column headers',  f'Row 4: {cols[:5]}', 'ok'),
+                    ('Base row',        f'Row 7: "{r7c0[:30]}"', 'ok'),
+                    ('Data start',      'Row 9 (every 3 rows)', 'ok'),
+                    ('Value type',      'Floats 0-1 (×100 for %)', 'ok'),
+                ]
+                return {'matched_profile': 'GQR Standard',
+                        'findings': findings, 'sample_columns': cols, 'n_sheets': n_sheets}
+
     # KP Omni: row 1=project name, row 2="Table N", row 4=question
     # Has "Base Weighted" somewhere in rows 10-20
     if len(raw) > 6:
@@ -720,6 +750,18 @@ def detect_and_describe(file_bytes):
             c2 = str(raw[2][0]).strip() if len(raw)>2 and raw[2] and raw[2][0] else ''
             c4 = str(raw[4][0]).strip() if len(raw)>4 and raw[4] and raw[4][0] else ''
 
+            # GQR Standard: row 2=question, row 4 col1=Total, row 7=Base:
+            def _c(r, col):
+                try:
+                    v = raw[r][col]
+                    return str(v).strip() if v and str(v) not in ('nan','None') else ''
+                except: return ''
+            r0v=_c(0,0); r2v=_c(2,0); r4c1v=_c(4,1); r7c0v=_c(7,0); r3c0v=_c(3,0)
+            if (len(r2v) > 10 and 'total' in r4c1v.lower()
+                    and r7c0v.lower().startswith('base')
+                    and len(r0v) > 5 and not len(r3c0v) > 10):
+                ref_si = si; ref_raw = raw; break
+
             # KP Omni: row 2 = "Table N", row 4 = real question wording
             if c2.lower().startswith('table ') and len(c4) > 10:
                 ref_si = si; ref_raw = raw; break
@@ -754,6 +796,15 @@ def detect_and_describe(file_bytes):
     r5c1=cell(5,1)
 
     findings.append(('First data sheet', f'Sheet {ref_si} of {n_sheets}', 'info'))
+
+    # GQR Standard: project at row 0, question at row 2, Total at row 4 col1, Base at row 7
+    if len(raw) > 7:
+        if (len(r2) > 10
+                and 'total' in cell(4, 1).lower()
+                and cell(7, 0).lower().startswith('base')
+                and len(cell(0, 0)) > 5
+                and not len(r3c0) > 10):
+            return "GQR Standard", 92
 
     # KP Omni: row 2 = "Table N", row 4 = question, has Base Weighted
     if r2.lower().startswith('table') and len(r4c0) > 10:
