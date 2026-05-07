@@ -750,16 +750,16 @@ def detect_and_describe(file_bytes):
             c2 = str(raw[2][0]).strip() if len(raw)>2 and raw[2] and raw[2][0] else ''
             c4 = str(raw[4][0]).strip() if len(raw)>4 and raw[4] and raw[4][0] else ''
 
-            # GQR Standard: row 2=question, row 4 col1=Total, row 7=Base:
+            # GQR Standard: project at row 0, question at row 2, Total at row 4 col 1
             def _c(r, col):
                 try:
                     v = raw[r][col]
                     return str(v).strip() if v and str(v) not in ('nan','None') else ''
                 except: return ''
-            r0v=_c(0,0); r2v=_c(2,0); r4c1v=_c(4,1); r7c0v=_c(7,0); r3c0v=_c(3,0)
-            if (len(r2v) > 10 and 'total' in r4c1v.lower()
-                    and r7c0v.lower().startswith('base')
-                    and len(r0v) > 5 and not len(r3c0v) > 10):
+            _r0=_c(0,0); _r2=_c(2,0); _r3c0=_c(3,0); _r4c1=_c(4,1); _r7c0=_c(7,0)
+            if (len(_r2) > 10 and 'total' in _r4c1.lower()
+                    and _r7c0.lower().startswith('base')
+                    and len(_r0) > 5 and not len(_r3c0) > 10):
                 ref_si = si; ref_raw = raw; break
 
             # KP Omni: row 2 = "Table N", row 4 = real question wording
@@ -794,18 +794,6 @@ def detect_and_describe(file_bytes):
     r3c0=cell(3,0); r3c1=cell(3,1)
     r4c0=cell(4,0); r4c1=cell(4,1)
     r5c1=cell(5,1)
-
-    findings.append(('First data sheet', f'Sheet {ref_si} of {n_sheets}', 'info'))
-
-    # GQR Standard: project at row 0, question at row 2, Total at row 4 col1, Base at row 7
-    if len(raw) > 7:
-        if (len(r2) > 10
-                and 'total' in cell(4, 1).lower()
-                and cell(7, 0).lower().startswith('base')
-                and len(cell(0, 0)) > 5
-                and not len(r3c0) > 10):
-            return "GQR Standard", 92
-
     # KP Omni: row 2 = "Table N", row 4 = question, has Base Weighted
     if r2.lower().startswith('table') and len(r4c0) > 10:
         has_bw = any('base weighted' in str(ref_raw[ri][0] if ref_raw[ri] else '').lower()
@@ -824,6 +812,30 @@ def detect_and_describe(file_bytes):
                 ('Data start',     f'Row {bw_row+1 if bw_row else "?"} (every 3 rows)', 'ok'),
             ]
             return {'matched_profile': 'KP Omni',
+                    'findings': findings, 'sample_columns': cols, 'n_sheets': n_sheets}
+
+    # GQR Standard: project at row 0, question at row 2, Total at row 4 col 1, Base at row 7
+    if len(ref_raw) > 7:
+        _r0 = cell(0, 0); _r2 = cell(2, 0); _r3c0 = cell(3, 0)
+        _r4c1 = cell(4, 1); _r7c0 = cell(7, 0)
+        if (len(_r2) > 10
+                and 'total' in _r4c1.lower()
+                and _r7c0.lower().startswith('base')
+                and len(_r0) > 5
+                and not len(_r3c0) > 10):
+            h_data = ref_raw[4] if len(ref_raw) > 4 else []
+            cols   = [str(v).strip() for v in h_data[1:]
+                      if isinstance(v, str) and v.strip()
+                      and v.strip() not in (' ',) and len(v.strip()) > 1]
+            findings += [
+                ('Project ID',       f'Row 0: "{_r0[:40]}"', 'ok'),
+                ('Question wording', f'Row 2: "{_r2[:55]}"', 'ok'),
+                ('Group headers',    'Row 3 (Gender, Race, Class...)', 'ok'),
+                ('Column headers',   f'Row 4: {cols[:5]}', 'ok'),
+                ('Base row',         f'Row 7: "{_r7c0[:30]}"', 'ok'),
+                ('Data start',       'Row 9 (every 3 rows)', 'ok'),
+            ]
+            return {'matched_profile': 'GQR Standard',
                     'findings': findings, 'sample_columns': cols, 'n_sheets': n_sheets}
 
     # Corporate Reputation
