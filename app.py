@@ -263,13 +263,27 @@ if confirmed and st.session_state.files and not st.session_state.scan_done:
     if st.button("◈  Scan file"):
         with st.spinner("Scanning..."):
             try:
-                ref  = st.session_state.files[0]['bytes']
-                toc  = read_toc(ref, confirmed)
-                if toc:
-                    groups = toc_to_groups(toc)
-                else:
-                    groups = fast_scan(ref, confirmed)
-                cols = get_columns(ref, confirmed)
+                files = st.session_state.files
+
+                # Build question list from first file
+                ref = files[0]['bytes']
+                toc = read_toc(ref, confirmed)
+                groups = toc_to_groups(toc) if toc else fast_scan(ref, confirmed)
+                cols   = get_columns(ref, confirmed)
+
+                # For multi-file: merge questions from all other files
+                # so questions that only exist in wave 2+ are still shown
+                if len(files) > 1:
+                    seen = {g['prefix'] for g in groups}
+                    for finfo in files[1:]:
+                        extra_toc = read_toc(finfo['bytes'], confirmed)
+                        extra = (toc_to_groups(extra_toc) if extra_toc
+                                 else fast_scan(finfo['bytes'], confirmed))
+                        for g in extra:
+                            if g['prefix'] not in seen:
+                                groups.append(g)
+                                seen.add(g['prefix'])
+
                 st.session_state.question_groups = groups
                 st.session_state.columns         = cols
                 st.session_state.scan_done       = True

@@ -780,10 +780,24 @@ def generate_excel(selections, files, profile_name, col_indices, col_names,
             for fi, finfo in enumerate(files):
                 parsed_list = _find_and_parse_all(
                     finfo['bytes'], prefix, profile_name, col_indices, include_types)
-                for p in parsed_list:
-                    row = _write_table(ws, row, finfo['label'], col_names,
-                                       p['base_vals'], p['answers'], p['values'],
-                                       wave_idx=fi, net_start=p.get('net_start'))
+                if parsed_list:
+                    for p in parsed_list:
+                        row = _write_table(ws, row, finfo['label'], col_names,
+                                           p['base_vals'], p['answers'], p['values'],
+                                           wave_idx=fi, net_start=p.get('net_start'))
+                else:
+                    # Question not found in this wave — write a placeholder row
+                    na_fill = WAVE_FILLS[fi % len(WAVE_FILLS)]
+                    na_font = WAVE_FONTS[fi % len(WAVE_FONTS)]
+                    lbl = ws.cell(row=row, column=1,
+                                  value=f"{finfo['label']}  —  not available in this file")
+                    lbl.font      = na_font
+                    lbl.fill      = na_fill
+                    lbl.alignment = LEFT
+                    lbl.border    = BORDER
+                    ws.merge_cells(start_row=row, start_column=1,
+                                   end_row=row, end_column=len(col_names) + 1)
+                    row += 3
 
     if toc_entries:
         _build_toc(wb, toc_entries)
@@ -914,15 +928,24 @@ def generate_word(selections, files, profile_name, col_indices, col_names,
         for fi, finfo in enumerate(files):
             parsed_list = _find_and_parse_all(
                 finfo['bytes'], prefix, profile_name, col_indices, include_types)
-            for p in parsed_list:
-                title  = (f"{p['wording']}  —  {finfo['label']}"
-                          if len(files) > 1 else p['wording'])
-                tbl_el = _write_word_table(doc, insert_after, title,
-                                           col_names, p['base_vals'],
-                                           p['answers'], p['values'])
-                spacer_el = OxmlElement('w:p')
-                tbl_el.addnext(spacer_el)
-                insert_after = DocxPara(spacer_el, topline_para._parent)
+            if parsed_list:
+                for p in parsed_list:
+                    title  = (f"{p['wording']}  —  {finfo['label']}"
+                              if len(files) > 1 else p['wording'])
+                    tbl_el = _write_word_table(doc, insert_after, title,
+                                               col_names, p['base_vals'],
+                                               p['answers'], p['values'])
+                    spacer_el = OxmlElement('w:p')
+                    tbl_el.addnext(spacer_el)
+                    insert_after = DocxPara(spacer_el, topline_para._parent)
+            elif len(files) > 1:
+                # Placeholder paragraph for missing wave
+                na_para = _insert_para_after(
+                    insert_after,
+                    f"{finfo['label']}  —  not available in this file",
+                    bold=True, size_pt=9,
+                )
+                insert_after = na_para
 
     buf = io.BytesIO()
     doc.save(buf)
@@ -1019,6 +1042,25 @@ def detect_and_describe(file_bytes):
             ('Data start',         'Row 12 (every 3 rows)', 'ok'),
         ]
         return {'matched_profile': 'Corporate Reputation',
+                'findings': findings, 'sample_columns': cols, 'n_sheets': n_sheets}
+
+    # IData: row 2 = question, row 3 col 0 blank (group headers), row 4 col 1 = Total
+    # Distinguished from GBI by Total NOT appearing in row 3
+    if (len(r2) > 10
+            and not r3c0
+            and 'total' not in (r3c0 + r3c1).lower()
+            and 'total' in r4c1.lower()):
+        h_data = ref_raw[4] if len(ref_raw) > 4 else []
+        cols   = [str(v).strip() for v in h_data[1:]
+                  if v and str(v) not in ('nan','None','\xa0')]
+        findings += [
+            ('Question wording', f'Row 2: "{r2[:50]}"', 'ok'),
+            ('Group headers',    f'Row 3: (blank col 0)', 'ok'),
+            ('Column headers',   f'Row 4: {cols[:4]}', 'ok'),
+            ('Base row',         'Row 7 (Base: Total Answering)', 'ok'),
+            ('Data start',       'Row 9 (every 3 rows)', 'ok'),
+        ]
+        return {'matched_profile': 'IData',
                 'findings': findings, 'sample_columns': cols, 'n_sheets': n_sheets}
 
     # Global Brand Identity
