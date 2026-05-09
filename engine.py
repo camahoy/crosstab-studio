@@ -213,58 +213,87 @@ def _detect_sheet_type(wording):
 
 # ── Column reader ─────────────────────────────────────────────
 
+def _find_header_row(raw, max_rows=35):
+    """
+    Find the row that contains 'Total' as a column header value.
+    Skips rows where the majority of non-blank values are single letters (sig-code rows).
+    Returns row index or None.
+    """
+    for ri, row in enumerate(raw[:max_rows]):
+        if not row:
+            continue
+        str_vals = [str(v).strip() for v in row
+                    if v is not None and str(v).strip() not in ('', 'nan', 'None', '\xa0')]
+        if not str_vals:
+            continue
+        # Skip letter-code rows (>= half the values are single alpha chars)
+        single_letter = sum(1 for s in str_vals if len(s) == 1 and s.isalpha())
+        if single_letter >= len(str_vals) / 2:
+            continue
+        # Look for an exact 'total' match in any column
+        for v in str_vals:
+            if v.lower() == 'total' or v.lower().startswith('total respondent'):
+                return ri
+    return None
+
+
 def get_columns(file_bytes, profile_name):
     """
-    Get available column names from first real data sheet.
+    Get available column names from the first real data sheet.
+    Finds the header row by locating the row that contains 'Total' as a
+    column header value, skipping letter-code rows (A, B, C…).
     Returns list of (col_index, name, sublabel).
     """
-    profile = PROFILES[profile_name]
-    xl      = pd.ExcelFile(io.BytesIO(file_bytes))
-    start   = 1 if profile.get("skip_sheet_0") else 0
-    h_row   = profile["header_row"]  # may be None for KP Omni
-    s_row   = profile.get("sublabel_row", h_row)
-    # For dynamic profiles, nrows will be set after reading the file
-    nrows   = max(h_row or 20, s_row or 20) + 2
+    profile   = PROFILES[profile_name]
+    xl        = pd.ExcelFile(io.BytesIO(file_bytes))
+    start     = 1 if profile.get("skip_sheet_0") else 0
+    s_row_idx = profile.get("sublabel_row")   # only GBI has this
 
     for i in range(start, min(start + 10, len(xl.sheet_names))):
         try:
-            df   = xl.parse(i, header=None, na_values=[''])
-            raw  = df.values.tolist()
+            df  = xl.parse(i, header=None, na_values=[''])
+            raw = df.values.tolist()
 
-            # KP Omni: detect header row dynamically
+            # KP Omni: anchor on Base Weighted, go up 2
             if profile.get("dynamic_base"):
                 bw_row = _find_base_weighted_row(raw)
-                h_row  = (bw_row - 2) if bw_row is not None else 12
-                s_row  = h_row
-                nrows  = (bw_row + 1) if bw_row is not None else 16
+                h_row  = (bw_row - 2) if bw_row is not None else _find_header_row(raw)
+            else:
+                # All other formats: find the row whose values include 'Total'
+                h_row = _find_header_row(raw)
+                # Fall back to profile value if Total not found
+                if h_row is None:
+                    h_row = profile.get("header_row")
 
-            hrow = raw[h_row] if h_row is not None and len(raw) > h_row else []
-            srow = raw[s_row] if s_row is not None and len(raw) > s_row and s_row != h_row else []
+            if h_row is None or h_row >= len(raw):
+                continue
 
-            col_start = profile.get("column_start", 1)
+            hrow = raw[h_row]
+            srow = (raw[s_row_idx]
+                    if s_row_idx is not None and s_row_idx < len(raw)
+                    else [])
 
-            # Auto-detect: Total at col 0 or col 1
-            if col_start == "auto":
-                col0      = hrow[0] if hrow else None
-                col_start = 0 if (isinstance(col0, str) and 'total' in col0.lower()) else 1
-
-            # KP: find where 'total' is in the header row
-            elif col_start == "find_total":
-                col_start = 0
-                for ci, v in enumerate(hrow):
-                    if isinstance(v, str) and 'total' in v.lower():
-                        col_start = ci
-                        break
+            # Determine which column Total lives in → that's col_start
+            col_start = 1  # default
+            for ci, v in enumerate(hrow):
+                if isinstance(v, str) and v.strip().lower() == 'total':
+                    col_start = ci
+                    break
 
             cols = []
             for j in range(col_start, len(hrow)):
-                g = hrow[j]
-                s = srow[j] if srow and j < len(srow) else ''
-                if isinstance(g, str) and g.strip() and g.strip() not in ('\xa0',):
-                    # Skip if it looks like a letter code row (all single letters)
-                    if len(g.strip()) == 1 and g.strip().isalpha():
-                        continue
-                    cols.append((j, g.strip(), s.strip() if isinstance(s, str) else ''))
+                v = hrow[j]
+                if not isinstance(v, str) or not v.strip() or v.strip() in ('\xa0', ' '):
+                    continue
+                vs = v.strip()
+                # Skip single-letter sig codes
+                if len(vs) == 1 and vs.isalpha():
+                    continue
+                s = (srow[j].strip()
+                     if srow and j < len(srow) and isinstance(srow[j], str)
+                     else '')
+                cols.append((j, vs, s))
+
             if cols:
                 return cols
         except Exception:
@@ -352,7 +381,9 @@ def parse_sheet(file_bytes, sheet_idx, profile_name, col_indices):
     val_off = profile.get("value_row_offset", 1)
     stop_on = set(s.lower() for s in profile.get("stop_on", ["sigma"]))
 
-    answers, values, sig_data = [], [], []
+    main_answers,  main_values,  main_sig  = [], [], []
+    net_answers,   net_values,   net_sig   = [], [], []
+
     i = data_start
     while i < len(raw):
         lbl = raw[i][0] if raw[i] else None
@@ -363,14 +394,32 @@ def parse_sheet(file_bytes, sheet_idx, profile_name, col_indices):
                                                'base =', 'weighted base', 'base unweighted',
                                                'upper case', 'lower case', 'field dates')):
                 i += 1; continue
-            answers.append(lbl.strip())
+
             val_row = raw[i + val_off] if i + val_off < len(raw) else []
             sig_row = raw[i + 2]       if i + 2       < len(raw) else []
-            values.append([_coerce(val_row[j] if j < len(val_row) else None) for j in col_indices])
-            sig_data.append([sig_row[j] if j < len(sig_row) else None for j in col_indices])
+            vals    = [_coerce(val_row[j] if j < len(val_row) else None) for j in col_indices]
+            sigs    = [sig_row[j] if j < len(sig_row) else None for j in col_indices]
+
+            # T2B/B2B rows stay in place; (Net) rows move to bottom
+            is_t2b_b2b = ('top 2 box' in cl or 'bottom 2 box' in cl
+                          or cl.startswith('t2b') or cl.startswith('b2b'))
+            if '(net)' in cl and not is_t2b_b2b:
+                net_answers.append(lbl.strip())
+                net_values.append(vals)
+                net_sig.append(sigs)
+            else:
+                main_answers.append(lbl.strip())
+                main_values.append(vals)
+                main_sig.append(sigs)
+
             i += step
             continue
         i += 1
+
+    # Merge: main rows first, then net rows with has_nets flag so caller can draw separator
+    answers  = main_answers + net_answers
+    values   = main_values  + net_values
+    sig_data = main_sig     + net_sig
 
     return {
         'wording':   wording,
@@ -379,6 +428,7 @@ def parse_sheet(file_bytes, sheet_idx, profile_name, col_indices):
         'answers':   answers,
         'values':    values,
         'sig_data':  sig_data,
+        'net_start': len(main_answers),   # index where Net rows begin (for separator line)
     }
 
 # ── Excel styles ──────────────────────────────────────────────
@@ -408,8 +458,12 @@ def _fmt_pct(v):
     return str(v)
 
 
+NET_BORDER  = Border(left=THIN, right=THIN,
+                     top=Side(style="thin", color="0F2D4A"), bottom=THIN)
+
+
 def _write_table(ws, row, wording, col_headers, base_vals,
-                 answers, values, wave_idx=None):
+                 answers, values, wave_idx=None, net_start=None):
     n_cols = len(col_headers)
 
     # Title
@@ -436,17 +490,19 @@ def _write_table(ws, row, wording, col_headers, base_vals,
         cell.border    = BORDER
     row += 1
 
-    # Data rows
+    # Data rows — draw a 1pt dark top border before the first Net row
+    has_net_sep = net_start is not None and 0 < net_start < len(answers)
     for ri, answer in enumerate(answers):
-        fill = ALT_FILL if ri % 2 == 0 else PatternFill()
+        fill       = ALT_FILL if ri % 2 == 0 else PatternFill()
+        use_border = NET_BORDER if (has_net_sep and ri == net_start) else BORDER
         lc = ws.cell(row=row, column=1, value=str(answer))
-        lc.font=BODY_FONT; lc.alignment=LEFT; lc.border=BORDER; lc.fill=fill
+        lc.font=BODY_FONT; lc.alignment=LEFT; lc.border=use_border; lc.fill=fill
         row_vals = values[ri] if ri < len(values) else []
         for ci in range(n_cols):
             v    = row_vals[ci] if ci < len(row_vals) else None
             cell = ws.cell(row=row, column=ci + 2)
             cell.font=BODY_FONT; cell.alignment=CTR
-            cell.border=BORDER;  cell.fill=fill
+            cell.border=use_border; cell.fill=fill
             cell.value = _fmt_pct(v)
         row += 1
 
@@ -515,14 +571,181 @@ def _build_toc(wb, toc_entries):
         nav.alignment=Alignment(horizontal='left', vertical='center')
 
 
+_SUMMARY_MARKERS = frozenset([
+    'top 2 box summary', 'top box summary',
+    'bottom 2 box summary', 'bottom box summary',
+    'grid table', 'summary grid',
+    'increased summary', 'decreased summary',
+    'mean summary',
+])
+
+def _sheet_type_from_text(text):
+    tl = text.lower()
+    if 'top 2 box' in tl or 'top box summary' in tl:   return 't2b'
+    if 'bottom 2 box' in tl or 'bottom box summary' in tl: return 'b2b'
+    if 'grid table' in tl or 'summary grid' in tl:      return 'summary_grid'
+    if 'mean' in tl or 'average' in tl:                 return 'mean'
+    return 'standard'
+
+
+def read_toc(file_bytes, profile_name):
+    """
+    Read the TOC/Index sheet (sheet 0) and return a structured question map.
+
+    Returns list of:
+        {sheet_idx, prefix, wording, statement, sheet_type, base_text}
+
+    TOC layouts by format
+    ─────────────────────
+    Corporate Reputation  col0=sheet#  col1=full_text
+    GBI / KP Omni / IData col0=sheet#  col1=table#  col2=label  col3=full_text  col4=base
+    """
+    try:
+        df  = pd.ExcelFile(io.BytesIO(file_bytes)).parse(0, header=None, na_values=[''])
+        raw = df.values.tolist()
+    except Exception:
+        return []
+
+    results = []
+    corp_rep = (profile_name == "Corporate Reputation")
+
+    for row in raw:
+        if not row or row[0] is None:
+            continue
+        # Col 0 must be a numeric sheet index
+        v0 = row[0]
+        if isinstance(v0, str):
+            try:   v0 = float(v0.strip())
+            except: continue
+        if not isinstance(v0, (int, float)) or isinstance(v0, bool):
+            continue
+        sheet_idx = int(v0)
+
+        def cell(ci):
+            try:
+                v = row[ci]
+                return str(v).strip() if v is not None and str(v) not in ('nan', 'None') else ''
+            except:
+                return ''
+
+        c1, c2, c3, c4 = cell(1), cell(2), cell(3), cell(4)
+
+        if corp_rep:
+            full_text = c1
+            label     = None
+            base_text = ''
+        else:
+            # GBI / KP Omni / IData:  col2=label, col3=full_text, col4=base
+            full_text = c3 if c3 else c1
+            label     = c2 if c2 else None
+            base_text = c4
+
+        if not full_text or len(full_text) < 3:
+            continue
+
+        sheet_type = _sheet_type_from_text(full_text)
+
+        # Split off statement (text after last " - " that isn't a summary marker)
+        wording   = full_text
+        statement = None
+        if ' - ' in full_text:
+            head, tail = full_text.rsplit(' - ', 1)
+            if not any(m in tail.lower() for m in _SUMMARY_MARKERS):
+                wording   = head.strip()
+                statement = tail.strip()
+
+        # Extract prefix
+        if label and re.match(r'^[A-Za-z0-9_\.]+$', label):
+            prefix = label.rstrip('.')
+        else:
+            m      = re.match(r'^([A-Za-z0-9_]+)[\.\s]', wording)
+            prefix = m.group(1) if m else wording[:8]
+
+        results.append({
+            'sheet_idx':  sheet_idx,
+            'prefix':     prefix,
+            'wording':    wording,
+            'statement':  statement,
+            'sheet_type': sheet_type,
+            'base_text':  base_text,
+        })
+
+    return results
+
+
+def toc_to_groups(toc_entries):
+    """
+    Convert read_toc() list into the same group format as fast_scan():
+        {prefix, wording, sheets: [int], types: [str]}
+    """
+    groups = {}
+    order  = []
+    for entry in toc_entries:
+        p = entry['prefix']
+        if p not in groups:
+            groups[p] = {
+                'prefix':  p,
+                'wording': entry['wording'][:100],
+                'sheets':  [],
+                'types':   set(),
+            }
+            order.append(p)
+        groups[p]['sheets'].append(entry['sheet_idx'])
+        groups[p]['types'].add(entry['sheet_type'])
+
+    for g in groups.values():
+        g['types'] = sorted(g['types'])
+    return [groups[p] for p in order]
+
+
 def _find_and_parse(file_bytes, prefix, profile_name, col_indices):
+    """Find sheets matching prefix (via TOC then fast_scan fallback) and parse the first."""
+    toc = read_toc(file_bytes, profile_name)
+    if toc:
+        matches = [e for e in toc if e['prefix'] == prefix]
+        if matches:
+            return parse_sheet(file_bytes, matches[0]['sheet_idx'], profile_name, col_indices)
     groups = fast_scan(file_bytes, profile_name)
     match  = next((g for g in groups if g['prefix'] == prefix), None)
     if match is None: return None
     return parse_sheet(file_bytes, match['sheets'][0], profile_name, col_indices)
 
 
-def generate_excel(selections, files, profile_name, col_indices, col_names):
+def _find_and_parse_all(file_bytes, prefix, profile_name, col_indices, include_types=None):
+    """
+    Like _find_and_parse but returns ALL matching sheets for a prefix,
+    filtered by include_types (set of sheet type strings, or None = all).
+    Returns list of parsed dicts.
+    """
+    toc = read_toc(file_bytes, profile_name)
+    if toc:
+        entries = [e for e in toc if e['prefix'] == prefix]
+        if include_types:
+            entries = [e for e in entries if e['sheet_type'] in include_types]
+        return [p for e in entries
+                for p in [parse_sheet(file_bytes, e['sheet_idx'], profile_name, col_indices)]
+                if p and p['answers']]
+
+    # Fallback: fast_scan
+    groups = fast_scan(file_bytes, profile_name)
+    match  = next((g for g in groups if g['prefix'] == prefix), None)
+    if match is None: return []
+    sheets = match['sheets']
+    if include_types:
+        types = match.get('types', [])
+        sheets = [match['sheets'][i] for i, t in enumerate(types)
+                  if t in include_types] if len(types) == len(sheets) else sheets
+    return [p for si in sheets
+            for p in [parse_sheet(file_bytes, si, profile_name, col_indices)]
+            if p and p['answers']]
+
+
+def generate_excel(selections, files, profile_name, col_indices, col_names,
+                   include_types=None):
+    """
+    include_types: set of sheet type strings to include, e.g. {'standard', 't2b'}.
+                   None means include all.
+    """
     wb          = openpyxl.Workbook()
     wb.remove(wb.active)
     toc_entries = []
@@ -540,10 +763,12 @@ def generate_excel(selections, files, profile_name, col_indices, col_names):
         row = 1 if ws.max_row <= 1 else ws.max_row + 2
 
         if len(files) == 1:
-            p = _find_and_parse(files[0]['bytes'], prefix, profile_name, col_indices)
-            if p and p['answers']:
+            parsed_list = _find_and_parse_all(
+                files[0]['bytes'], prefix, profile_name, col_indices, include_types)
+            for p in parsed_list:
                 row = _write_table(ws, row, p['wording'], col_names,
-                                   p['base_vals'], p['answers'], p['values'])
+                                   p['base_vals'], p['answers'], p['values'],
+                                   net_start=p.get('net_start'))
         else:
             title_cell = ws.cell(row=row, column=1, value=wording[:100])
             title_cell.font      = XLFont(bold=True, name="Arial", size=12, color="0F2D4A")
@@ -553,10 +778,12 @@ def generate_excel(selections, files, profile_name, col_indices, col_names):
             row += 2
 
             for fi, finfo in enumerate(files):
-                p = _find_and_parse(finfo['bytes'], prefix, profile_name, col_indices)
-                if p is None or not p['answers']: continue
-                row = _write_table(ws, row, finfo['label'], col_names,
-                                   p['base_vals'], p['answers'], p['values'], wave_idx=fi)
+                parsed_list = _find_and_parse_all(
+                    finfo['bytes'], prefix, profile_name, col_indices, include_types)
+                for p in parsed_list:
+                    row = _write_table(ws, row, finfo['label'], col_names,
+                                       p['base_vals'], p['answers'], p['values'],
+                                       wave_idx=fi, net_start=p.get('net_start'))
 
     if toc_entries:
         _build_toc(wb, toc_entries)
@@ -661,7 +888,7 @@ def _write_word_table(doc, insert_after_para, question_wording,
 
 
 def generate_word(selections, files, profile_name, col_indices, col_names,
-                  survey_title=''):
+                  survey_title='', include_types=None):
     import os
     if not os.path.exists(TEMPLATE_PATH):
         return None, "template_doc.docx not found in app directory"
@@ -683,17 +910,19 @@ def generate_word(selections, files, profile_name, col_indices, col_names,
     insert_after = topline_para
 
     for sel in selections:
-        prefix  = sel['prefix']
+        prefix = sel['prefix']
         for fi, finfo in enumerate(files):
-            p = _find_and_parse(finfo['bytes'], prefix, profile_name, col_indices)
-            if p is None or not p['answers']: continue
-            title = f"{p['wording']}  —  {finfo['label']}" if len(files) > 1 else p['wording']
-            tbl_el = _write_word_table(doc, insert_after, title,
-                                       col_names, p['base_vals'],
-                                       p['answers'], p['values'])
-            spacer_el = OxmlElement('w:p')
-            tbl_el.addnext(spacer_el)
-            insert_after = DocxPara(spacer_el, topline_para._parent)
+            parsed_list = _find_and_parse_all(
+                finfo['bytes'], prefix, profile_name, col_indices, include_types)
+            for p in parsed_list:
+                title  = (f"{p['wording']}  —  {finfo['label']}"
+                          if len(files) > 1 else p['wording'])
+                tbl_el = _write_word_table(doc, insert_after, title,
+                                           col_names, p['base_vals'],
+                                           p['answers'], p['values'])
+                spacer_el = OxmlElement('w:p')
+                tbl_el.addnext(spacer_el)
+                insert_after = DocxPara(spacer_el, topline_para._parent)
 
     buf = io.BytesIO()
     doc.save(buf)

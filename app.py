@@ -4,7 +4,8 @@ Upload-first flow: file detection drives profile selection.
 """
 
 import streamlit as st
-from engine import fast_scan, get_columns, generate_excel, generate_word, detect_and_describe
+from engine import (fast_scan, get_columns, generate_excel, generate_word,
+                    detect_and_describe, read_toc, toc_to_groups)
 from profiles import get_profile_names, get_profile
 
 st.set_page_config(
@@ -84,6 +85,7 @@ for k, v in {
     'files': [], 'detected': None, 'confirmed_profile': None,
     'question_groups': [], 'columns': [], 'selected_qs': set(),
     'selected_cols': [], 'scan_done': False,
+    'include_types': {'standard', 't2b', 'b2b', 'summary_grid', 'mean'},
 }.items():
     if k not in st.session_state:
         st.session_state[k] = v
@@ -261,13 +263,17 @@ if confirmed and st.session_state.files and not st.session_state.scan_done:
     if st.button("◈  Scan file"):
         with st.spinner("Scanning..."):
             try:
-                ref    = st.session_state.files[0]['bytes']
-                groups = fast_scan(ref, confirmed)
-                cols   = get_columns(ref, confirmed)
+                ref  = st.session_state.files[0]['bytes']
+                toc  = read_toc(ref, confirmed)
+                if toc:
+                    groups = toc_to_groups(toc)
+                else:
+                    groups = fast_scan(ref, confirmed)
+                cols = get_columns(ref, confirmed)
                 st.session_state.question_groups = groups
                 st.session_state.columns         = cols
                 st.session_state.scan_done       = True
-                st.session_state.selected_cols   = [j for j,g,s in cols]
+                st.session_state.selected_cols   = [j for j, g, s in cols]
                 st.rerun()
             except Exception as e:
                 st.error(f"Scan failed: {e}")
@@ -288,6 +294,24 @@ if st.session_state.scan_done:
         f'<span class="stat-pill">{len(cols)} columns</span>',
         unsafe_allow_html=True
     )
+
+    # Sheet-type filter
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    st.markdown('<div class="step-label">Sheet types to include</div>', unsafe_allow_html=True)
+    type_opts = [
+        ('standard',     'Standard'),
+        ('t2b',          'T2B Summary'),
+        ('b2b',          'B2B Summary'),
+        ('summary_grid', 'Grid'),
+        ('mean',         'Mean'),
+    ]
+    type_cols = st.columns(len(type_opts))
+    include_types = set()
+    for col_el, (key, label) in zip(type_cols, type_opts):
+        with col_el:
+            if st.checkbox(label, value=(key in st.session_state.include_types), key=f"type_{key}"):
+                include_types.add(key)
+    st.session_state.include_types = include_types
     st.markdown("<br>", unsafe_allow_html=True)
 
     left, right = st.columns([1.8, 1])
@@ -418,6 +442,7 @@ if st.session_state.scan_done:
                             confirmed,
                             col_indices,
                             col_names,
+                            include_types=st.session_state.include_types or None,
                         )
                         st.success(f"Done — {n_sel} questions exported")
                         st.download_button(
@@ -434,6 +459,7 @@ if st.session_state.scan_done:
                             col_indices,
                             col_names,
                             survey_title=survey_title,
+                            include_types=st.session_state.include_types or None,
                         )
                         if err:
                             st.error(f"Word export failed: {err}")
