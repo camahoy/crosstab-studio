@@ -639,6 +639,8 @@ def read_toc(file_bytes, profile_name):
             except: continue
         if not isinstance(v0, (int, float)) or isinstance(v0, bool):
             continue
+        if isinstance(v0, float) and math.isnan(v0):
+            continue
         sheet_idx = int(v0)
 
         def cell(ci):
@@ -1035,14 +1037,18 @@ def deep_scan_file(file_bytes):
     if not data_sheets:
         data_sheets = [0]
 
-    if len(data_sheets) <= 8:
-        sample_indices = data_sheets
+    # Always include the first 15 data sheets for reliable detection,
+    # then append a few spread across the rest to catch outliers.
+    front          = data_sheets[:15]
+    if len(data_sheets) > 15:
+        tail_step  = max(1, (len(data_sheets) - 15) // 5)
+        tail       = data_sheets[15::tail_step][:5]
     else:
-        step           = (len(data_sheets) - 1) / 7.0
-        sample_indices = sorted(set(data_sheets[round(i * step)] for i in range(8)))
+        tail       = []
+    sample_indices = sorted(set(front + tail))
 
-    sampled     = []
-    row_preview = None
+    sampled        = []
+    sheet_previews = []   # up to 3 sheets shown in the wizard UI
 
     base_kws = ('base', 'unweighted base', 'base weighted', 'weighted base', 'n =', 'n=')
 
@@ -1053,12 +1059,17 @@ def deep_scan_file(file_bytes):
             if not raw or len(raw) < 4:
                 continue
 
-            if row_preview is None:
-                row_preview = [
-                    [(str(c) if c is not None and str(c) not in ('nan', 'None') else '')
-                     for c in (row[:12] if len(row) >= 12 else row + [''] * (12 - len(row)))]
-                    for row in raw[:15]
-                ]
+            cleaned = [
+                [(str(c) if c is not None and str(c) not in ('nan', 'None') else '')
+                 for c in (row[:10] if len(row) >= 10 else row + [''] * (10 - len(row)))]
+                for row in raw[:18]
+            ]
+            if len(sheet_previews) < 3:
+                sheet_previews.append({
+                    'sheet_idx':  si,
+                    'sheet_name': sheet_names[si],
+                    'rows':       cleaned,
+                })
 
             h_row = _find_header_row(raw, max_rows=25)
 
@@ -1133,7 +1144,7 @@ def deep_scan_file(file_bytes):
             'has_toc': has_toc, 'toc_summary': toc_summary,
             'sheet_count': n_sheets, 'sampled': [],
             'dominant': None, 'outlier_sheets': [], 'variant_count': 0,
-            'row_preview': row_preview or [],
+            'sheet_previews': sheet_previews,
         }
 
     # ── Find dominant pattern ─────────────────────────────────
@@ -1185,7 +1196,7 @@ def deep_scan_file(file_bytes):
         'dominant':       dominant,
         'outlier_sheets': outlier_sheets,
         'variant_count':  variant_count,
-        'row_preview':    row_preview or [],
+        'sheet_previews': sheet_previews,
     }
 
 

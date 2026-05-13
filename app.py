@@ -10,6 +10,26 @@ from engine import (fast_scan, get_columns, generate_excel, generate_word,
                     deep_scan_file, save_user_profile)
 from profiles import get_profile_names, get_profile
 
+def _show_preview(rows, q0, h0, b0, d0):
+    """Render a color-coded row preview table for the format wizard."""
+    if not rows:
+        return
+    n_cols = max(len(r) for r in rows)
+    df = pd.DataFrame(
+        rows,
+        index=[f"Row {i+1}" for i in range(len(rows))],
+        columns=[f"Col {j+1}" for j in range(n_cols)],
+    )
+    def row_style(row):
+        idx = int(row.name.split()[1]) - 1
+        if idx == q0:  return ['background-color:#DBEAFE;font-weight:bold'] * len(row)
+        if idx == h0:  return ['background-color:#DCFCE7;font-weight:bold'] * len(row)
+        if idx == b0:  return ['background-color:#FEF3C7;font-weight:bold'] * len(row)
+        if d0 <= idx < d0 + 4: return ['background-color:#F0FDF4'] * len(row)
+        return [''] * len(row)
+    st.dataframe(df.style.apply(row_style, axis=1), use_container_width=True)
+
+
 st.set_page_config(
     page_title="Crosstab Studio",
     page_icon="◈",
@@ -230,7 +250,7 @@ if st.session_state.files and st.session_state.detected is not None:
 
         # ── Deep scan (runs once, result cached in session state) ──
         if st.session_state.deep_scan_result is None:
-            with st.spinner("Scanning all sheets to learn the file structure…"):
+            with st.spinner("Scanning first 15 sheets to learn the file structure…"):
                 st.session_state.deep_scan_result = deep_scan_file(
                     st.session_state.files[0]['bytes']
                 )
@@ -240,108 +260,167 @@ if st.session_state.files and st.session_state.detected is not None:
         if scan.get('error'):
             st.error(f"Scan error: {scan['error']}")
         elif scan.get('dominant'):
-            dom = scan['dominant']
+            dom      = scan['dominant']
+            previews = scan.get('sheet_previews', [])
 
-            # ── Scan summary ──────────────────────────────────────
-            sc1, sc2 = st.columns(2)
-            with sc1:
-                st.markdown(
-                    f"<div style='font-size:0.82rem;color:#374151;margin-top:8px'>"
-                    f"<b>Scan complete</b> — {scan['sheet_count']} sheets total, "
-                    f"{len(scan['sampled'])} sampled"
-                    f"{'  ·  ' + scan['toc_summary'] if scan['has_toc'] else ''}"
-                    f"</div>",
-                    unsafe_allow_html=True
-                )
-            with sc2:
-                if scan['variant_count'] > 0:
-                    st.markdown(
-                        f"<div style='font-size:0.82rem;color:#D97706;margin-top:8px'>"
-                        f"⚠ {scan['variant_count']} variant layout(s) found in "
-                        f"{len(scan['outlier_sheets'])} sheet(s) — "
-                        f"dominant pattern covers the rest"
-                        f"</div>",
-                        unsafe_allow_html=True
-                    )
-
-            # ── Row preview ───────────────────────────────────────
-            if scan.get('row_preview'):
-                with st.expander("Row preview — first data sheet (rows 1–15)", expanded=False):
-                    preview = scan['row_preview']
-                    df_prev = pd.DataFrame(
-                        preview,
-                        index=[f"Row {i+1}" for i in range(len(preview))],
-                        columns=[f"Col {j+1}" for j in range(len(preview[0]) if preview else 0)],
-                    )
-                    st.dataframe(df_prev, use_container_width=True)
-
-            # ── Format wizard ─────────────────────────────────────
+            # ── Scan summary pills ────────────────────────────────
+            summary_parts = [
+                f"{scan['sheet_count']} sheets",
+                f"{len(scan['sampled'])} scanned",
+            ]
+            if scan['has_toc']:
+                summary_parts.append(scan['toc_summary'])
+            if scan['variant_count'] > 0:
+                summary_parts.append(f"⚠ {scan['variant_count']} variant layout(s)")
             st.markdown(
-                "<div style='font-size:0.88rem;font-weight:600;color:#0F2D4A;"
-                "margin:18px 0 6px'>Confirm file structure</div>"
-                "<div style='font-size:0.78rem;color:#6B7280;margin-bottom:12px'>"
-                "Row numbers as shown in Excel (Row 1 = first row of spreadsheet). "
-                "Pre-filled from scan — adjust if anything looks off.</div>",
+                ''.join(f'<span class="stat-pill">{p}</span>' for p in summary_parts),
+                unsafe_allow_html=True
+            )
+            st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+            # ── Visual row previews ───────────────────────────────
+            st.markdown(
+                "<div style='font-size:0.82rem;font-weight:600;color:#0F2D4A;margin-bottom:6px'>"
+                "Step 1 — Check that the highlighted rows look right</div>"
+                "<div style='font-size:0.76rem;color:#6B7280;margin-bottom:8px'>"
+                "Colours show what was detected in each row. Adjust the row numbers below if any are wrong.</div>",
+                unsafe_allow_html=True
+            )
+
+            # Legend
+            st.markdown(
+                "<div style='display:flex;flex-wrap:wrap;gap:10px;font-size:0.72rem;"
+                "margin-bottom:10px'>"
+                "<span style='background:#DBEAFE;padding:2px 10px;border-radius:3px;"
+                "font-family:monospace'>🔵 Question</span>"
+                "<span style='background:#DCFCE7;padding:2px 10px;border-radius:3px;"
+                "font-family:monospace'>🟢 Column headers (Total)</span>"
+                "<span style='background:#FEF3C7;padding:2px 10px;border-radius:3px;"
+                "font-family:monospace'>🟡 Base / N size</span>"
+                "<span style='background:#F0FDF4;padding:2px 10px;border-radius:3px;"
+                "font-family:monospace'>🟩 Data rows</span>"
+                "</div>",
+                unsafe_allow_html=True
+            )
+
+            q0 = dom.get('question_row', -1)
+            h0 = dom.get('header_row', -1)
+            b0 = dom.get('base_row', -1)
+            d0 = dom.get('data_start', -1)
+
+            def _style_preview(df):
+                def row_style(row):
+                    idx = int(row.name.split()[1]) - 1  # "Row 3" → 2
+                    if idx == q0:
+                        return ['background-color:#DBEAFE;font-weight:bold'] * len(row)
+                    if idx == h0:
+                        return ['background-color:#DCFCE7;font-weight:bold'] * len(row)
+                    if idx == b0:
+                        return ['background-color:#FEF3C7;font-weight:bold'] * len(row)
+                    if d0 <= idx < d0 + 4:
+                        return ['background-color:#F0FDF4'] * len(row)
+                    return [''] * len(row)
+                return df.style.apply(row_style, axis=1)
+
+            if len(previews) > 1:
+                tab_labels = [f"Sheet: {p['sheet_name'][:20]}" for p in previews]
+                tabs = st.tabs(tab_labels)
+                for tab, pv in zip(tabs, previews):
+                    with tab:
+                        _show_preview(pv['rows'], q0, h0, b0, d0)
+            elif previews:
+                _show_preview(previews[0]['rows'], q0, h0, b0, d0)
+
+            st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+
+            # ── Format wizard form ────────────────────────────────
+            st.markdown(
+                "<div style='font-size:0.82rem;font-weight:600;color:#0F2D4A;margin-bottom:4px'>"
+                "Step 2 — Confirm or correct the row numbers</div>"
+                "<div style='font-size:0.76rem;color:#6B7280;margin-bottom:10px'>"
+                "Use Excel row numbers (Row 1 = very first row of the spreadsheet).</div>",
                 unsafe_allow_html=True
             )
 
             with st.form("format_wizard"):
-                wc1, wc2 = st.columns(2)
+                wc1, wc2, wc3 = st.columns(3)
 
-                # Display 1-indexed (Excel rows), store 0-indexed in profile
                 with wc1:
                     q_row_in = st.number_input(
-                        "Question wording row",
+                        "Question row",
                         min_value=1, max_value=60,
-                        value=(dom['question_row'] or 2) + 1,
-                        help="Row containing the question text",
+                        value=(q0 or 2) + 1,
+                        help="The row that contains the full question text. "
+                             "Look for the longest sentence in column A near the top.",
                     )
                     h_row_in = st.number_input(
-                        "Column headers row (where 'Total' appears)",
+                        "Column headers row",
                         min_value=1, max_value=60,
-                        value=(dom['header_row'] or 4) + 1,
-                    )
-                    b_row_in = st.number_input(
-                        "Base / N row",
-                        min_value=1, max_value=60,
-                        value=(dom['base_row'] or 7) + 1,
+                        value=(h0 or 4) + 1,
+                        help="The row where subgroup names appear — 'Total', 'Male', "
+                             "'Female', etc. Usually the row highlighted green above.",
                     )
 
                 with wc2:
-                    d_start_in = st.number_input(
-                        "Data starts at row",
+                    b_row_in = st.number_input(
+                        "Base / N row",
                         min_value=1, max_value=60,
-                        value=(dom['data_start'] or 9) + 1,
+                        value=(b0 or 7) + 1,
+                        help="The row showing sample sizes, e.g. 'Base: Total Answering' "
+                             "or 'Unweighted Base'. Usually highlighted yellow above.",
                     )
+                    d_start_in = st.number_input(
+                        "First data row",
+                        min_value=1, max_value=60,
+                        value=(d0 or 9) + 1,
+                        help="The row where the first answer choice label appears "
+                             "(e.g. 'Strongly agree', 'Yes'). Usually 1–2 rows below Base.",
+                    )
+
+                with wc3:
                     d_step_in = st.number_input(
                         "Rows per answer choice",
                         min_value=1, max_value=10,
                         value=dom.get('data_step', 3),
-                        help="Usually 3 (label / value / sig-code)",
+                        help="How many rows each answer choice takes up. "
+                             "Almost always 3: one for the label, one for the value, "
+                             "one for the significance code.",
                     )
                     col_start_in = st.number_input(
-                        "'Total' column (1 = column A)",
+                        "Column where 'Total' appears",
                         min_value=1, max_value=20,
                         value=(dom.get('col_start', 1) or 1) + 1,
+                        help="Which column (A=1, B=2 …) the 'Total' header sits in. "
+                             "Column A is usually labels; Total is often column B (=2).",
                     )
 
-                stop_raw  = st.text_input(
-                    "Stop parsing when this text appears in column A",
+                stop_raw = st.text_input(
+                    "Stop reading when this word appears in column A",
                     value=", ".join(dom.get('stop_on') or ['sigma']),
-                    help="Comma-separated. E.g.: sigma, back to top",
+                    help="Comma-separated words that mark the end of an answer list. "
+                         "Common values: sigma, back to top, total mentions. "
+                         "The parser stops when it sees any of these in the first column.",
                 )
-                skip_toc  = st.checkbox(
-                    "Skip first sheet (it's a table of contents)",
+                skip_toc = st.checkbox(
+                    "The first sheet is a table of contents — skip it",
                     value=scan['has_toc'],
+                    help="Tick this if sheet 1 is an index/contents page listing all questions. "
+                         "The parser will start reading from sheet 2 onwards.",
                 )
 
-                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-                pname_in  = st.text_input(
-                    "Save this format as",
-                    placeholder="e.g.  MyClient Tracker",
-                    help="Saved to user_profiles.json — available in all future sessions",
+                st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+                st.markdown(
+                    "<div style='font-size:0.82rem;font-weight:600;color:#0F2D4A;margin-bottom:4px'>"
+                    "Step 3 — Name and save this format</div>",
+                    unsafe_allow_html=True
                 )
-                submitted = st.form_submit_button("◈  Save format and use it")
+                pname_in  = st.text_input(
+                    "Format name",
+                    placeholder="e.g.  Acme Tracker  or  LSEG Q3 Banner",
+                    help="Give this layout a name so you can reuse it next time "
+                         "you upload a file from the same source.",
+                )
+                submitted = st.form_submit_button("◈  Save format and continue →")
 
                 if submitted:
                     pname = pname_in.strip()
@@ -368,15 +447,18 @@ if st.session_state.files and st.session_state.detected is not None:
                         st.session_state.confirmed_profile = pname
                         st.session_state.scan_done         = False
                         st.session_state.selected_qs       = set()
-                        st.success(f"Profile '{pname}' saved — continuing with scan.")
+                        st.success(f"✓ Format '{pname}' saved.")
                         st.rerun()
 
-        # ── Manual override (always available) ────────────────
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        # ── Manual override ───────────────────────────────────
+        st.markdown(
+            "<div style='font-size:0.76rem;color:#6B7280;margin-top:16px;margin-bottom:4px'>"
+            "Already know which format this is?</div>",
+            unsafe_allow_html=True
+        )
         manual = st.selectbox(
-            "Or try an existing profile:",
-            ["— select —"] + [p for p in get_profile_names()
-                              if p != "+ Add new format"],
+            "Try an existing profile",
+            ["— select —"] + [p for p in get_profile_names() if p != "+ Add new format"],
             label_visibility="collapsed",
         )
         if manual != "— select —" and st.button("Try this profile"):
