@@ -134,8 +134,31 @@ PROFILES = {
     },
 }
 
+def _load_user():
+    import json, os
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'user_profiles.json')
+    try:
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
 def get_profile_names():
-    return list(PROFILES.keys())
+    names = list(PROFILES.keys())
+    user  = _load_user()
+    # Insert user profiles just before "+ Add new format"
+    insert_at = len(names) - 1
+    for uname in user:
+        if uname not in names:
+            names.insert(insert_at, uname)
+            insert_at += 1
+    return names
+
 
 def get_profile(name):
-    return PROFILES.get(name)
+    if name in PROFILES:
+        return PROFILES[name]
+    return _load_user().get(name)

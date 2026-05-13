@@ -6,13 +6,33 @@ Wave-by-wave comparison support.
 
 print("CROSSTAB STUDIO ENGINE v1.1")
 
-import io, math, re, os
+import io, math, re, os, json
+from collections import Counter
 import numpy as np
 import pandas as pd
 import openpyxl
 from openpyxl.styles import Font as XLFont, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 from profiles import PROFILES
+
+USER_PROFILES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'user_profiles.json')
+
+
+def load_user_profiles():
+    try:
+        if os.path.exists(USER_PROFILES_PATH):
+            with open(USER_PROFILES_PATH, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def save_user_profile(name, profile_dict):
+    profiles = load_user_profiles()
+    profiles[name] = profile_dict
+    with open(USER_PROFILES_PATH, 'w') as f:
+        json.dump(profiles, f, indent=2)
 from docx import Document
 from docx.shared import Pt, RGBColor, Inches
 from docx.oxml.ns import qn
@@ -950,6 +970,223 @@ def generate_word(selections, files, profile_name, col_indices, col_names,
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue(), None
+
+
+def deep_scan_file(file_bytes):
+    """
+    Full-file structural scan for unknown banner formats.
+
+    Reads the TOC (if present), samples up to 8 sheets spread across the
+    whole file, infers the dominant row layout, and flags outlier sheets.
+
+    Returns dict:
+        has_toc        bool
+        toc_summary    str
+        sheet_count    int
+        sampled        list of per-sheet dicts
+        dominant       dict with question_row/header_row/base_row/data_start/
+                           data_step/col_start/stop_on  (all 0-indexed)
+        outlier_sheets list of sheet indices that don't match dominant
+        variant_count  int  (number of distinct non-dominant patterns)
+        row_preview    list[list[str]]  first 15 rows × 12 cols of first data sheet
+    """
+    try:
+        xl          = pd.ExcelFile(io.BytesIO(file_bytes))
+        sheet_names = xl.sheet_names
+        n_sheets    = len(sheet_names)
+    except Exception as e:
+        return {'error': str(e), 'sheet_count': 0}
+
+    # ── TOC detection ─────────────────────────────────────────
+    has_toc     = False
+    toc_summary = ''
+    if n_sheets > 1:
+        try:
+            df0  = xl.parse(0, header=None, nrows=6, na_values=[''])
+            raw0 = df0.values.tolist()
+            toc_kw = ('sheet number', 'table of contents', 'contents', 'index', 'table number')
+            for row in raw0[:4]:
+                if row and row[0] and isinstance(row[0], str):
+                    if any(kw in row[0].strip().lower() for kw in toc_kw):
+                        has_toc = True
+                        break
+            if not has_toc:
+                num_count = sum(
+                    1 for row in raw0[1:]
+                    if row and row[0] is not None
+                    and isinstance(row[0], (int, float))
+                    and not isinstance(row[0], bool)
+                )
+                has_toc = num_count >= 2
+            if has_toc:
+                df0f        = xl.parse(0, header=None, na_values=[''])
+                entry_count = sum(
+                    1 for row in df0f.values.tolist()
+                    if row and isinstance(row[0], (int, float))
+                    and not isinstance(row[0], bool)
+                )
+                toc_summary = f"TOC found — ~{entry_count} entries"
+        except Exception:
+            pass
+
+    # ── Sheet sampling ────────────────────────────────────────
+    start       = 1 if (has_toc and n_sheets > 1) else 0
+    data_sheets = list(range(start, n_sheets))
+    if not data_sheets:
+        data_sheets = [0]
+
+    if len(data_sheets) <= 8:
+        sample_indices = data_sheets
+    else:
+        step           = (len(data_sheets) - 1) / 7.0
+        sample_indices = sorted(set(data_sheets[round(i * step)] for i in range(8)))
+
+    sampled     = []
+    row_preview = None
+
+    base_kws = ('base', 'unweighted base', 'base weighted', 'weighted base', 'n =', 'n=')
+
+    for si in sample_indices:
+        try:
+            df  = xl.parse(si, header=None, nrows=40, na_values=[''])
+            raw = df.values.tolist()
+            if not raw or len(raw) < 4:
+                continue
+
+            if row_preview is None:
+                row_preview = [
+                    [(str(c) if c is not None and str(c) not in ('nan', 'None') else '')
+                     for c in (row[:12] if len(row) >= 12 else row + [''] * (12 - len(row)))]
+                    for row in raw[:15]
+                ]
+
+            h_row = _find_header_row(raw, max_rows=25)
+
+            # Base row
+            b_row = None
+            for ri, row in enumerate(raw):
+                if row and isinstance(row[0], str):
+                    cl = row[0].strip().lower()
+                    if any(cl == kw or cl.startswith(kw + ' ') or cl.startswith(kw + ':')
+                           for kw in base_kws):
+                        b_row = ri
+                        break
+
+            # Question row — last long string above h_row
+            q_row = None
+            if h_row is not None:
+                for candidate in range(h_row - 1, max(-1, h_row - 6), -1):
+                    if 0 <= candidate < len(raw):
+                        v = raw[candidate][0] if raw[candidate] else None
+                        if v and isinstance(v, str):
+                            vs = v.strip()
+                            if (len(vs) > 10
+                                    and not vs.lower().startswith('table ')
+                                    and not vs.replace('.', '').replace(',', '').replace(' ', '').isnumeric()):
+                                q_row = candidate
+                                break
+
+            # Data start
+            data_start = None
+            if b_row is not None:
+                data_start = b_row + 1
+                if data_start < len(raw) and raw[data_start]:
+                    v = raw[data_start][0]
+                    # If the row right after base is very short, skip it (sublabel row)
+                    if v and isinstance(v, str) and len(v.strip()) < 4:
+                        data_start = b_row + 2
+
+            # Column start (where "Total" lives)
+            col_start = 1
+            if h_row is not None and h_row < len(raw):
+                for ci, v in enumerate(raw[h_row]):
+                    if isinstance(v, str) and v.strip().lower() == 'total':
+                        col_start = ci
+                        break
+
+            # Stop-row patterns found in this sheet
+            stop_patterns = []
+            known_stops   = ('sigma', 'back to top', 'total mentions',
+                             'overlap formula used', 'field dates')
+            for row in raw:
+                if row and row[0] and isinstance(row[0], str):
+                    v = row[0].strip().lower()
+                    if v in known_stops and v not in stop_patterns:
+                        stop_patterns.append(v)
+
+            sampled.append({
+                'sheet_idx':     si,
+                'sheet_name':    sheet_names[si],
+                'question_row':  q_row,
+                'header_row':    h_row,
+                'base_row':      b_row,
+                'data_start':    data_start,
+                'data_step':     3,
+                'col_start':     col_start,
+                'stop_patterns': stop_patterns,
+            })
+        except Exception:
+            continue
+
+    if not sampled:
+        return {
+            'has_toc': has_toc, 'toc_summary': toc_summary,
+            'sheet_count': n_sheets, 'sampled': [],
+            'dominant': None, 'outlier_sheets': [], 'variant_count': 0,
+            'row_preview': row_preview or [],
+        }
+
+    # ── Find dominant pattern ─────────────────────────────────
+    def sig(s):
+        return (s['question_row'], s['header_row'], s['base_row'],
+                s['data_start'], s['col_start'])
+
+    valid      = [s for s in sampled
+                  if all(v is not None for v in [s['question_row'], s['header_row'],
+                                                 s['base_row'], s['data_start']])]
+    sig_counts = Counter(sig(s) for s in valid)
+
+    if sig_counts:
+        dom_sig, _  = sig_counts.most_common(1)[0]
+        all_stops   = set()
+        for s in valid:
+            if sig(s) == dom_sig:
+                all_stops.update(s['stop_patterns'])
+        dominant = {
+            'question_row': dom_sig[0],
+            'header_row':   dom_sig[1],
+            'base_row':     dom_sig[2],
+            'data_start':   dom_sig[3],
+            'data_step':    3,
+            'col_start':    dom_sig[4],
+            'stop_on':      sorted(all_stops) or ['sigma'],
+        }
+        outlier_sheets = [s['sheet_idx'] for s in valid if sig(s) != dom_sig]
+        variant_count  = max(0, len(sig_counts) - 1)
+    else:
+        s0       = sampled[0]
+        dominant = {
+            'question_row': s0.get('question_row') or 2,
+            'header_row':   s0.get('header_row') or 4,
+            'base_row':     s0.get('base_row') or 7,
+            'data_start':   s0.get('data_start') or 9,
+            'data_step':    3,
+            'col_start':    s0.get('col_start') or 1,
+            'stop_on':      s0.get('stop_patterns') or ['sigma'],
+        }
+        outlier_sheets = []
+        variant_count  = 0
+
+    return {
+        'has_toc':        has_toc,
+        'toc_summary':    toc_summary,
+        'sheet_count':    n_sheets,
+        'sampled':        sampled,
+        'dominant':       dominant,
+        'outlier_sheets': outlier_sheets,
+        'variant_count':  variant_count,
+        'row_preview':    row_preview or [],
+    }
 
 
 def detect_and_describe(file_bytes):
