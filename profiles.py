@@ -52,10 +52,10 @@ PROFILES = {
         "multi_file_mode":           "subgroups",
     },
     "KP": {
-        "description": "KP topline banner — question at row 2, subgroups at row 1",
+        "description": "KP topline banner — question at row 2, subgroups at row 4",
         "specs": [
             ("Question row",   "Row 2 (multi-line support)"),
-            ("Column headers", "Row 1 (finds Total dynamically)"),
+            ("Column headers", "Row 4 (Total, subgroup names)"),
             ("Base row",       "Row 7"),
             ("Data start",     "Dynamic (after base row)"),
             ("Data step",      "Every 3 rows"),
@@ -63,13 +63,13 @@ PROFILES = {
             ("Stop on",        "Total Mentions / Back to Top / Sigma"),
         ],
         "question_row":         2,
-        "header_row":           1,
+        "header_row":           4,
         "base_row":             7,
         "data_start":           None,
         "data_step":            3,
         "value_row_offset":     1,
         "skip_sheet_0":         True,
-        "column_start":         "find_total",
+        "column_start":         1,
         "stop_on":              ["total mentions", "back to top", "sigma",
                                  "overlap formula used"],
         "coerce_strings":       False,
@@ -102,12 +102,11 @@ PROFILES = {
         "dynamic_base":         True,    # flag: use dynamic row detection
     },
     "IData": {
-        "description": "GQR standard banner — question at row 2, group headers at row 3, categories at row 4",
+        "description": "IData banner — question at row 2, subgroups at row 4",
         "specs": [
             ("Question row",   "Row 2"),
-            ("Group headers",  "Row 3 (Gender, Race, Class...)"),
             ("Column headers", "Row 4 (Total at col 1)"),
-            ("Base row",       "Row 7 (Base: Total Answering)"),
+            ("Base row",       "Row 7"),
             ("Data start",     "Row 9"),
             ("Data step",      "Every 3 rows"),
             ("Value row",      "Row offset +1"),
@@ -121,8 +120,7 @@ PROFILES = {
         "value_row_offset":     1,
         "skip_sheet_0":         True,
         "column_start":         1,
-        "stop_on":              ["sigma", "overlap formula used", "- column means:",
-                                 "- column proportions:"],
+        "stop_on":              ["sigma", "overlap formula used"],
         "coerce_strings":       False,
         "multi_file_mode":      "waves",
     },
@@ -136,8 +134,31 @@ PROFILES = {
     },
 }
 
+def _load_user():
+    import json, os
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'user_profiles.json')
+    try:
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
 def get_profile_names():
-    return list(PROFILES.keys())
+    names = list(PROFILES.keys())
+    user  = _load_user()
+    # Insert user profiles just before "+ Add new format"
+    insert_at = len(names) - 1
+    for uname in user:
+        if uname not in names:
+            names.insert(insert_at, uname)
+            insert_at += 1
+    return names
+
 
 def get_profile(name):
-    return PROFILES.get(name)
+    if name in PROFILES:
+        return PROFILES[name]
+    return _load_user().get(name)

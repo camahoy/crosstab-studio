@@ -4,7 +4,10 @@ Upload-first flow: file detection drives profile selection.
 """
 
 import streamlit as st
-from engine import fast_scan, get_columns, generate_excel, generate_word, detect_and_describe
+import pandas as pd
+from engine import (fast_scan, get_columns, generate_excel, generate_word,
+                    detect_and_describe, read_toc, toc_to_groups,
+                    deep_scan_file, save_user_profile)
 from profiles import get_profile_names, get_profile
 
 st.set_page_config(
@@ -84,6 +87,8 @@ for k, v in {
     'files': [], 'detected': None, 'confirmed_profile': None,
     'question_groups': [], 'columns': [], 'selected_qs': set(),
     'selected_cols': [], 'scan_done': False,
+    'include_types': {'standard', 't2b', 'b2b', 'summary_grid', 'mean'},
+    'deep_scan_result': None,
 }.items():
     if k not in st.session_state:
         st.session_state[k] = v
@@ -122,6 +127,7 @@ if uploaded_files:
         st.session_state.confirmed_profile = None
         st.session_state.scan_done         = False
         st.session_state.selected_qs       = set()
+        st.session_state.deep_scan_result  = None
 
     new_files = []
     label_col, _ = st.columns([1.5, 1])
@@ -209,7 +215,7 @@ if st.session_state.files and st.session_state.detected is not None:
 
     else:
         st.markdown(
-            '<div class="detect-title">✗ Format not recognised</div>',
+            '<div class="detect-title">✗ Format not recognised — running full file scan…</div>',
             unsafe_allow_html=True
         )
         for key, val, status in findings:
@@ -222,19 +228,155 @@ if st.session_state.files and st.session_state.detected is not None:
             )
         st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown(
-            '<div class="unmatched-box">'
-            'This file structure is not currently supported. '
-            'Run <strong>examine_structure.py</strong> on this file in Colab and share the output '
-            'to add support for this format.'
-            '</div>',
-            unsafe_allow_html=True
-        )
+        # ── Deep scan (runs once, result cached in session state) ──
+        if st.session_state.deep_scan_result is None:
+            with st.spinner("Scanning all sheets to learn the file structure…"):
+                st.session_state.deep_scan_result = deep_scan_file(
+                    st.session_state.files[0]['bytes']
+                )
 
-        st.markdown("<br>", unsafe_allow_html=True)
+        scan = st.session_state.deep_scan_result or {}
+
+        if scan.get('error'):
+            st.error(f"Scan error: {scan['error']}")
+        elif scan.get('dominant'):
+            dom = scan['dominant']
+
+            # ── Scan summary ──────────────────────────────────────
+            sc1, sc2 = st.columns(2)
+            with sc1:
+                st.markdown(
+                    f"<div style='font-size:0.82rem;color:#374151;margin-top:8px'>"
+                    f"<b>Scan complete</b> — {scan['sheet_count']} sheets total, "
+                    f"{len(scan['sampled'])} sampled"
+                    f"{'  ·  ' + scan['toc_summary'] if scan['has_toc'] else ''}"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
+            with sc2:
+                if scan['variant_count'] > 0:
+                    st.markdown(
+                        f"<div style='font-size:0.82rem;color:#D97706;margin-top:8px'>"
+                        f"⚠ {scan['variant_count']} variant layout(s) found in "
+                        f"{len(scan['outlier_sheets'])} sheet(s) — "
+                        f"dominant pattern covers the rest"
+                        f"</div>",
+                        unsafe_allow_html=True
+                    )
+
+            # ── Row preview ───────────────────────────────────────
+            if scan.get('row_preview'):
+                with st.expander("Row preview — first data sheet (rows 1–15)", expanded=False):
+                    preview = scan['row_preview']
+                    df_prev = pd.DataFrame(
+                        preview,
+                        index=[f"Row {i+1}" for i in range(len(preview))],
+                        columns=[f"Col {j+1}" for j in range(len(preview[0]) if preview else 0)],
+                    )
+                    st.dataframe(df_prev, use_container_width=True)
+
+            # ── Format wizard ─────────────────────────────────────
+            st.markdown(
+                "<div style='font-size:0.88rem;font-weight:600;color:#0F2D4A;"
+                "margin:18px 0 6px'>Confirm file structure</div>"
+                "<div style='font-size:0.78rem;color:#6B7280;margin-bottom:12px'>"
+                "Row numbers as shown in Excel (Row 1 = first row of spreadsheet). "
+                "Pre-filled from scan — adjust if anything looks off.</div>",
+                unsafe_allow_html=True
+            )
+
+            with st.form("format_wizard"):
+                wc1, wc2 = st.columns(2)
+
+                # Display 1-indexed (Excel rows), store 0-indexed in profile
+                with wc1:
+                    q_row_in = st.number_input(
+                        "Question wording row",
+                        min_value=1, max_value=60,
+                        value=(dom['question_row'] or 2) + 1,
+                        help="Row containing the question text",
+                    )
+                    h_row_in = st.number_input(
+                        "Column headers row (where 'Total' appears)",
+                        min_value=1, max_value=60,
+                        value=(dom['header_row'] or 4) + 1,
+                    )
+                    b_row_in = st.number_input(
+                        "Base / N row",
+                        min_value=1, max_value=60,
+                        value=(dom['base_row'] or 7) + 1,
+                    )
+
+                with wc2:
+                    d_start_in = st.number_input(
+                        "Data starts at row",
+                        min_value=1, max_value=60,
+                        value=(dom['data_start'] or 9) + 1,
+                    )
+                    d_step_in = st.number_input(
+                        "Rows per answer choice",
+                        min_value=1, max_value=10,
+                        value=dom.get('data_step', 3),
+                        help="Usually 3 (label / value / sig-code)",
+                    )
+                    col_start_in = st.number_input(
+                        "'Total' column (1 = column A)",
+                        min_value=1, max_value=20,
+                        value=(dom.get('col_start', 1) or 1) + 1,
+                    )
+
+                stop_raw  = st.text_input(
+                    "Stop parsing when this text appears in column A",
+                    value=", ".join(dom.get('stop_on') or ['sigma']),
+                    help="Comma-separated. E.g.: sigma, back to top",
+                )
+                skip_toc  = st.checkbox(
+                    "Skip first sheet (it's a table of contents)",
+                    value=scan['has_toc'],
+                )
+
+                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+                pname_in  = st.text_input(
+                    "Save this format as",
+                    placeholder="e.g.  MyClient Tracker",
+                    help="Saved to user_profiles.json — available in all future sessions",
+                )
+                submitted = st.form_submit_button("◈  Save format and use it")
+
+                if submitted:
+                    pname = pname_in.strip()
+                    if not pname:
+                        st.warning("Please give this format a name before saving.")
+                    else:
+                        stop_list = [s.strip().lower() for s in stop_raw.split(',') if s.strip()]
+                        new_profile = {
+                            "description":      f"User-defined — {pname}",
+                            "specs":            [],
+                            "question_row":     q_row_in - 1,
+                            "header_row":       h_row_in - 1,
+                            "base_row":         b_row_in - 1,
+                            "data_start":       d_start_in - 1,
+                            "data_step":        d_step_in,
+                            "value_row_offset": 1,
+                            "skip_sheet_0":     skip_toc,
+                            "column_start":     col_start_in - 1,
+                            "stop_on":          stop_list or ['sigma'],
+                            "coerce_strings":   False,
+                            "multi_file_mode":  "waves",
+                        }
+                        save_user_profile(pname, new_profile)
+                        st.session_state.confirmed_profile = pname
+                        st.session_state.scan_done         = False
+                        st.session_state.selected_qs       = set()
+                        st.success(f"Profile '{pname}' saved — continuing with scan.")
+                        st.rerun()
+
+        # ── Manual override (always available) ────────────────
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
         manual = st.selectbox(
-            "Or manually select a profile to try:",
-            ["— select —"] + [p for p in get_profile_names() if p != "+ Add new format"],
+            "Or try an existing profile:",
+            ["— select —"] + [p for p in get_profile_names()
+                              if p != "+ Add new format"],
             label_visibility="collapsed",
         )
         if manual != "— select —" and st.button("Try this profile"):
@@ -261,13 +403,31 @@ if confirmed and st.session_state.files and not st.session_state.scan_done:
     if st.button("◈  Scan file"):
         with st.spinner("Scanning..."):
             try:
-                ref    = st.session_state.files[0]['bytes']
-                groups = fast_scan(ref, confirmed)
+                files = st.session_state.files
+
+                # Build question list from first file
+                ref = files[0]['bytes']
+                toc = read_toc(ref, confirmed)
+                groups = toc_to_groups(toc) if toc else fast_scan(ref, confirmed)
                 cols   = get_columns(ref, confirmed)
+
+                # For multi-file: merge questions from all other files
+                # so questions that only exist in wave 2+ are still shown
+                if len(files) > 1:
+                    seen = {g['prefix'] for g in groups}
+                    for finfo in files[1:]:
+                        extra_toc = read_toc(finfo['bytes'], confirmed)
+                        extra = (toc_to_groups(extra_toc) if extra_toc
+                                 else fast_scan(finfo['bytes'], confirmed))
+                        for g in extra:
+                            if g['prefix'] not in seen:
+                                groups.append(g)
+                                seen.add(g['prefix'])
+
                 st.session_state.question_groups = groups
                 st.session_state.columns         = cols
                 st.session_state.scan_done       = True
-                st.session_state.selected_cols   = [j for j,g,s in cols]
+                st.session_state.selected_cols   = [j for j, g, s in cols]
                 st.rerun()
             except Exception as e:
                 st.error(f"Scan failed: {e}")
@@ -288,6 +448,24 @@ if st.session_state.scan_done:
         f'<span class="stat-pill">{len(cols)} columns</span>',
         unsafe_allow_html=True
     )
+
+    # Sheet-type filter
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    st.markdown('<div class="step-label">Sheet types to include</div>', unsafe_allow_html=True)
+    type_opts = [
+        ('standard',     'Standard'),
+        ('t2b',          'T2B Summary'),
+        ('b2b',          'B2B Summary'),
+        ('summary_grid', 'Grid'),
+        ('mean',         'Mean'),
+    ]
+    type_cols = st.columns(len(type_opts))
+    include_types = set()
+    for col_el, (key, label) in zip(type_cols, type_opts):
+        with col_el:
+            if st.checkbox(label, value=(key in st.session_state.include_types), key=f"type_{key}"):
+                include_types.add(key)
+    st.session_state.include_types = include_types
     st.markdown("<br>", unsafe_allow_html=True)
 
     left, right = st.columns([1.8, 1])
@@ -391,16 +569,11 @@ if st.session_state.scan_done:
             label_visibility="collapsed",
         )
 
-        survey_title      = ''
-        portrait_landscape = False
+        survey_title = ''
         if export_fmt == "Media Release Template (Word)":
             survey_title = st.text_input(
                 "Survey title (appears in document header)",
                 placeholder="e.g. College Student Fall Mental Wellness Survey",
-            )
-            portrait_landscape = st.checkbox(
-                "Portrait orientation (default is landscape)",
-                value=False,
             )
 
         btn_label = (
@@ -423,6 +596,7 @@ if st.session_state.scan_done:
                             confirmed,
                             col_indices,
                             col_names,
+                            include_types=st.session_state.include_types or None,
                         )
                         st.success(f"Done — {n_sel} questions exported")
                         st.download_button(
@@ -439,7 +613,7 @@ if st.session_state.scan_done:
                             col_indices,
                             col_names,
                             survey_title=survey_title,
-                            portrait_landscape=portrait_landscape,
+                            include_types=st.session_state.include_types or None,
                         )
                         if err:
                             st.error(f"Word export failed: {err}")
