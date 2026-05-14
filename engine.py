@@ -281,10 +281,25 @@ def get_columns(file_bytes, profile_name):
             df  = xl.parse(i, header=None, na_values=[''])
             raw = df.values.tolist()
 
-            # KP Omni: anchor on Base Weighted, go up 2
+            # KP Omni: anchor on Base Weighted, then find whichever nearby
+            # row actually contains 'Total' (layout varies: bw-1 or bw-2)
             if profile.get("dynamic_base"):
                 bw_row = _find_base_weighted_row(raw)
-                h_row  = (bw_row - 2) if bw_row is not None else _find_header_row(raw)
+                if bw_row is not None:
+                    h_row = None
+                    for candidate in [bw_row - 1, bw_row - 2, bw_row - 3]:
+                        if 0 <= candidate < len(raw):
+                            vals = [str(v).strip() for v in (raw[candidate] or [])
+                                    if v and str(v) not in ('nan', 'None')]
+                            if any(v.lower() == 'total' or
+                                   v.lower().startswith('total respondent')
+                                   for v in vals):
+                                h_row = candidate
+                                break
+                    if h_row is None:
+                        h_row = _find_header_row(raw)
+                else:
+                    h_row = _find_header_row(raw)
             else:
                 # All other formats: find the row whose values include 'Total'
                 h_row = _find_header_row(raw)

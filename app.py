@@ -604,7 +604,6 @@ if st.session_state.scan_done:
 
     with right:
         st.markdown('<div class="step-label">Step 4 — Select columns</div>', unsafe_allow_html=True)
-        st.markdown("<div style='font-size:0.78rem;color:#6B7280;margin-bottom:8px'>Subgroups / countries to include</div>", unsafe_allow_html=True)
         sel_cols = []
         for j, g, s in cols:
             label   = g if not s or s.lower() == g.lower() else f"{g} — {s}"
