@@ -640,6 +640,12 @@ if st.session_state.scan_done:
             f'<span class="stat-pill">{n_col_sel} columns selected</span>',
             unsafe_allow_html=True
         )
+
+        # Base export filename from first uploaded file
+        import os as _os
+        _raw_name = st.session_state.files[0]['name'] if st.session_state.files else 'export'
+        _base_name = _os.path.splitext(_raw_name)[0]
+        export_stem = f"{_base_name}_reformatted"
         st.markdown("<br>", unsafe_allow_html=True)
 
         # Export format choice
@@ -683,7 +689,7 @@ if st.session_state.scan_done:
                         st.download_button(
                             label="⬇  Download Excel",
                             data=result_bytes,
-                            file_name="crosstab_studio_export.xlsx",
+                            file_name=f"{export_stem}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         )
                     else:
@@ -704,7 +710,7 @@ if st.session_state.scan_done:
                             st.download_button(
                                 label="⬇  Download Word",
                                 data=result_bytes,
-                                file_name="media_release.docx",
+                                file_name=f"{export_stem}.docx",
                                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                             )
                 except Exception as e:
