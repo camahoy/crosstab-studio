@@ -128,7 +128,7 @@ st.markdown('<div class="step-label">Step 1 — Upload your file</div>', unsafe_
 st.markdown(
     "<div style='font-size:0.8rem;color:#6B7280;margin-bottom:10px'>"
     "Upload one or more files. If comparing waves or subgroups, upload all files here "
-    "and label each one (e.g. W1, W2, W3 or Gen Pop, Tech Elite)."
+    "and label each one (e.g. W1, W2, W3  ·  Gen Pop, Millennials, Boomers  ·  Education, Income, Region)."
     "</div>",
     unsafe_allow_html=True
 )

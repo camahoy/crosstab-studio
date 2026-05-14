@@ -13,7 +13,14 @@ import pandas as pd
 import openpyxl
 from openpyxl.styles import Font as XLFont, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
-from profiles import PROFILES
+from profiles import PROFILES, get_profile as _get_profile
+
+def _profile(name):
+    """Resolve a profile by name, checking user profiles too."""
+    p = _get_profile(name)
+    if p is None:
+        raise KeyError(f"Unknown profile: {name!r}. Check user_profiles.json.")
+    return p
 
 USER_PROFILES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'user_profiles.json')
 
@@ -140,7 +147,7 @@ def fast_scan(file_bytes, profile_name):
     Rapidly read question names from each sheet.
     Returns ordered list of question groups.
     """
-    profile = PROFILES[profile_name]
+    profile = _profile(profile_name)
     q_row   = profile["question_row"]
     xl      = pd.ExcelFile(io.BytesIO(file_bytes))
     groups  = {}
@@ -264,7 +271,7 @@ def get_columns(file_bytes, profile_name):
     column header value, skipping letter-code rows (A, B, C…).
     Returns list of (col_index, name, sublabel).
     """
-    profile   = PROFILES[profile_name]
+    profile   = _profile(profile_name)
     xl        = pd.ExcelFile(io.BytesIO(file_bytes))
     start     = 1 if profile.get("skip_sheet_0") else 0
     s_row_idx = profile.get("sublabel_row")   # only GBI has this
@@ -347,7 +354,7 @@ def parse_sheet(file_bytes, sheet_idx, profile_name, col_indices):
     Parse one sheet. Returns wording, base values, answers, values.
     Handles all formats including KP Omni dynamic row detection.
     """
-    profile = PROFILES[profile_name]
+    profile = _profile(profile_name)
     xl      = pd.ExcelFile(io.BytesIO(file_bytes))
     df      = xl.parse(sheet_idx, header=None, na_values=[''])
     raw     = df.values.tolist()
