@@ -452,9 +452,10 @@ def parse_sheet(file_bytes, sheet_idx, profile_name, col_indices):
     base_data = raw[b_row] if len(raw) > b_row else []
     base_vals = [_coerce(base_data[j] if j < len(base_data) else None) for j in col_indices]
 
-    step    = profile.get("data_step", 3)
-    val_off = profile.get("value_row_offset", 1)
-    stop_on = set(s.lower() for s in profile.get("stop_on", ["sigma"]))
+    step             = profile.get("data_step", 3)
+    val_off          = profile.get("value_row_offset", 1)
+    stop_on          = set(s.lower() for s in profile.get("stop_on", ["sigma"]))
+    already_pct      = profile.get("values_already_pct", False)
 
     main_answers,  main_values,  main_sig  = [], [], []
     net_answers,   net_values,   net_sig   = [], [], []
@@ -473,6 +474,8 @@ def parse_sheet(file_bytes, sheet_idx, profile_name, col_indices):
             val_row = raw[i + val_off] if i + val_off < len(raw) else []
             sig_row = raw[i + 2]       if i + 2       < len(raw) else []
             vals    = [_coerce(val_row[j] if j < len(val_row) else None) for j in col_indices]
+            if already_pct:
+                vals = [v / 100.0 if isinstance(v, float) else v for v in vals]
             sigs    = [sig_row[j] if j < len(sig_row) else None for j in col_indices]
 
             # T2B/B2B rows stay in place; (Net) rows move to bottom

@@ -101,6 +101,7 @@ PROFILES = {
         "coerce_strings":       True,
         "multi_file_mode":      "waves",
         "kp_banner2":           True,   # flag: special column detection
+        "values_already_pct":   True,   # values stored as e.g. 19.0, not 0.19
     },
     "KP Omni": {
         "description": "KP Omni banner — question at row 4, dynamic base/header detection",
