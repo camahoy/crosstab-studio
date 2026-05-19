@@ -558,15 +558,14 @@ if st.session_state.scan_done:
         with c1:
             if st.button("Select all"):
                 st.session_state.selected_qs = {g['prefix'] for g in groups}
-                # Clear checkbox widget keys so value= takes effect on rerun
                 for g in groups:
-                    st.session_state.pop(f"q_{g['prefix']}", None)
+                    st.session_state[f"q_{g['prefix']}"] = True
                 st.rerun()
         with c2:
             if st.button("Clear all"):
                 st.session_state.selected_qs = set()
                 for g in groups:
-                    st.session_state.pop(f"q_{g['prefix']}", None)
+                    st.session_state[f"q_{g['prefix']}"] = False
                 st.rerun()
         with c3:
             search = st.text_input("Search", placeholder="Filter...", label_visibility="collapsed")
