@@ -75,6 +75,33 @@ PROFILES = {
         "coerce_strings":       False,
         "multi_file_mode":      "waves",
     },
+    "KP Banner 2": {
+        "description": "KP Banner 2 — question at row 4, group/subgroup headers at rows 8–9",
+        "specs": [
+            ("Detection",      "Row 0 col 1 = 'Back to Contents'"),
+            ("Question row",   "Row 4"),
+            ("Group headers",  "Row 8 (Total at col 1, group names from col 2)"),
+            ("Column headers", "Row 9 (subgroup names from col 2)"),
+            ("Base row",       "Row 13 (weighted base counts)"),
+            ("Data start",     "Row 15"),
+            ("Data step",      "Every 3 rows"),
+            ("Value row",      "Row offset +1 (percentages, already ×100)"),
+            ("Stop on",        "Total Mentions / Back to Top / Sigma"),
+        ],
+        "question_row":         4,
+        "header_row":           9,
+        "base_row":             13,
+        "data_start":           15,
+        "data_step":            3,
+        "value_row_offset":     1,
+        "skip_sheet_0":         True,
+        "column_start":         1,
+        "stop_on":              ["total mentions", "back to top", "sigma",
+                                 "overlap formula used"],
+        "coerce_strings":       True,
+        "multi_file_mode":      "waves",
+        "kp_banner2":           True,   # flag: special column detection
+    },
     "KP Omni": {
         "description": "KP Omni banner — question at row 4, dynamic base/header detection",
         "specs": [

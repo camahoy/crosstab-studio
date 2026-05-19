@@ -281,6 +281,39 @@ def get_columns(file_bytes, profile_name):
             df  = xl.parse(i, header=None, na_values=[''])
             raw = df.values.tolist()
 
+            # KP Banner 2: Total at row 8 col 1, subgroups at row 9 col 2+
+            # Combine group name (row 8) and subgroup name (row 9) as column label
+            if profile.get("kp_banner2"):
+                r8 = raw[8] if len(raw) > 8 else []
+                r9 = raw[9] if len(raw) > 9 else []
+                cols = []
+                # col 1 of row 8 = "Total" (no subgroup label in row 9)
+                if len(r8) > 1:
+                    total_v = str(r8[1]).strip() if r8[1] and str(r8[1]) not in ('nan','None') else ''
+                    if total_v and total_v.lower() != 'nan':
+                        sub_v = (str(r9[1]).strip()
+                                 if len(r9) > 1 and r9[1] and str(r9[1]) not in ('nan','None')
+                                 else '')
+                        label = f"{total_v} – {sub_v}" if sub_v else total_v
+                        cols.append((1, label, ''))
+                # cols 2+ of row 9 = subgroup names, paired with group names from row 8
+                for j in range(2, max(len(r8), len(r9))):
+                    grp = (str(r8[j]).strip()
+                           if j < len(r8) and r8[j] and str(r8[j]) not in ('nan','None','\xa0')
+                           else '')
+                    sub = (str(r9[j]).strip()
+                           if j < len(r9) and r9[j] and str(r9[j]) not in ('nan','None','\xa0')
+                           else '')
+                    if not grp and not sub:
+                        continue
+                    if len(sub) == 1 and sub.isalpha():
+                        continue  # skip sig-code rows
+                    label = f"{grp} – {sub}" if grp and sub else (grp or sub)
+                    cols.append((j, label, ''))
+                if cols:
+                    return cols
+                continue
+
             # KP Omni: anchor on Base Weighted, then find whichever nearby
             # row actually contains 'Total' (layout varies: bw-1 or bw-2)
             if profile.get("dynamic_base"):
@@ -1242,6 +1275,13 @@ def detect_and_describe(file_bytes):
             c2 = str(raw[2][0]).strip() if len(raw)>2 and raw[2] and raw[2][0] else ''
             c4 = str(raw[4][0]).strip() if len(raw)>4 and raw[4] and raw[4][0] else ''
 
+            # KP Banner 2: row 0 col 1 = "Back to Contents", question at row 4
+            r0c1_check = (str(raw[0][1]).strip()
+                          if len(raw) > 0 and raw[0] and len(raw[0]) > 1 and raw[0][1]
+                          else '')
+            if 'back to' in r0c1_check.lower() and len(c4) > 10:
+                ref_si = si; ref_raw = raw; break
+
             # KP Omni: row 2 = "Table N", row 4 = real question wording
             if c2.lower().startswith('table ') and len(c4) > 10:
                 ref_si = si; ref_raw = raw; break
@@ -1270,12 +1310,31 @@ def detect_and_describe(file_bytes):
                        if v and str(v) not in ('nan','None'))
         except: return False
 
-    r0=cell(0,0); r1=cell(1,0); r2=cell(2,0)
+    r0=cell(0,0); r0c1=cell(0,1); r1=cell(1,0); r2=cell(2,0)
     r3c0=cell(3,0); r3c1=cell(3,1)
     r4c0=cell(4,0); r4c1=cell(4,1)
     r5c1=cell(5,1)
 
     findings.append(('First data sheet', f'Sheet {ref_si} of {n_sheets}', 'info'))
+
+    # KP Banner 2: row 0 col 1 = "Back to Contents", question at row 4,
+    # group headers at row 8 (Total at col 1), subgroups at row 9
+    if 'back to' in r0c1.lower() and len(r4c0) > 10 and 'total' in cell(8, 1).lower():
+        r8 = ref_raw[8] if len(ref_raw) > 8 else []
+        r9 = ref_raw[9] if len(ref_raw) > 9 else []
+        groups  = [str(v).strip() for v in r8[1:] if v and str(v) not in ('nan','None','\xa0')]
+        subgrps = [str(v).strip() for v in r9[2:] if v and str(v) not in ('nan','None','\xa0')]
+        cols    = subgrps or groups
+        findings += [
+            ('Detection',      f'Row 0 col 1: "{r0c1}"', 'ok'),
+            ('Question wording', f'Row 4: "{r4c0[:50]}"', 'ok'),
+            ('Group headers',  f'Row 8: {groups[:4]}', 'ok'),
+            ('Column headers', f'Row 9: {cols[:4]}', 'ok'),
+            ('Base row',       'Row 13 (Weighted Base)', 'ok'),
+            ('Data start',     'Row 15 (every 3 rows)', 'ok'),
+        ]
+        return {'matched_profile': 'KP Banner 2',
+                'findings': findings, 'sample_columns': cols, 'n_sheets': n_sheets}
 
     # KP Omni: row 2 = "Table N", row 4 = question, has Base Weighted
     if r2.lower().startswith('table') and len(r4c0) > 10:
