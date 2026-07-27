@@ -45,6 +45,7 @@ from docx.shared import Pt, RGBColor, Inches
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from docx.text.paragraph import Paragraph as DocxPara
+from docx.enum.section import WD_ORIENT
 
 
 # ── Value coercion ────────────────────────────────────────────
@@ -102,6 +103,16 @@ def validate_format(file_bytes):
                 and ('total sample' in r2.lower() or 'weight' in r2.lower() or len(r2) < 50)
                 and ('total' in r4c1.lower() or 'total' in r5c1.lower())):
             return "Corporate Reputation", 95
+
+    # Global Brand Identity v2 (Meta UK):
+    # Row 2 = "Table: N" (colon), row 3 = question, row 5 col 1 = Total
+    if len(raw) > 6:
+        r2   = cell(2, 0)
+        r3   = cell(3, 0)
+        r5c1 = cell(5, 1)
+        if (r2.lower().startswith('table:') and len(r3) > 10
+                and 'total' in r5c1.lower()):
+            return "Global Brand Identity v2", 92
 
     # Global Brand Identity (fmt2):
     # Row 2 = question, row 3 col 0 or col 1 = Total, row 4 = sub-labels
@@ -333,6 +344,10 @@ def get_columns(file_bytes, profile_name):
                         h_row = _find_header_row(raw)
                 else:
                     h_row = _find_header_row(raw)
+            elif profile.get("use_fixed_header_row"):
+                # Profile specifies the exact header row (e.g. GBI v2 where an
+                # earlier row also contains "Total" as a group name)
+                h_row = profile.get("header_row")
             else:
                 # All other formats: find the row whose values include 'Total'
                 h_row = _find_header_row(raw)
@@ -989,6 +1004,16 @@ def generate_word(selections, files, profile_name, col_indices, col_names,
 
     doc = Document(TEMPLATE_PATH)
 
+    # Force portrait orientation and correct margins regardless of template defaults
+    section = doc.sections[0]
+    section.orientation = WD_ORIENT.PORTRAIT
+    section.page_width  = Inches(8.5)
+    section.page_height = Inches(11)
+    section.top_margin    = Inches(1.5)
+    section.bottom_margin = Inches(0.5)
+    section.left_margin   = Inches(1.13)
+    section.right_margin  = Inches(1.17)
+
     title_para = doc.paragraphs[1]
     for run in title_para.runs:
         run.text = ''
@@ -1285,6 +1310,11 @@ def detect_and_describe(file_bytes):
             if 'back to' in r0c1_check.lower() and len(c4) > 10:
                 ref_si = si; ref_raw = raw; break
 
+            # GBI v2: row 2 = "Table: N" (colon), row 3 = question
+            c3 = str(raw[3][0]).strip() if len(raw) > 3 and raw[3] and raw[3][0] else ''
+            if c2.lower().startswith('table:') and len(c3) > 10:
+                ref_si = si; ref_raw = raw; break
+
             # KP Omni: row 2 = "Table N", row 4 = real question wording
             if c2.lower().startswith('table ') and len(c4) > 10:
                 ref_si = si; ref_raw = raw; break
@@ -1394,6 +1424,25 @@ def detect_and_describe(file_bytes):
         ]
         return {'matched_profile': 'IData',
                 'findings': findings, 'sample_columns': cols, 'n_sheets': n_sheets}
+
+    # Global Brand Identity v2 (Meta UK): row 2 = "Table: N" (colon), question at row 3
+    r5_data = ref_raw[5] if len(ref_raw) > 5 else []
+    r4_data = ref_raw[4] if len(ref_raw) > 4 else []
+    if r2.lower().startswith('table:') and len(r3c0) > 10 and 'total' in r5c1.lower():
+        group_hdrs = [str(v).strip() for v in r4_data[1:]
+                      if v and str(v) not in ('nan','None','\xa0')]
+        subgrp_hdrs = [str(v).strip() for v in r5_data[1:]
+                       if v and str(v) not in ('nan','None','\xa0')]
+        findings += [
+            ('Detection',       f'Row 2: "{r2}" (Table: colon format)', 'ok'),
+            ('Question wording', f'Row 3: "{r3c0[:50]}"', 'ok'),
+            ('Group headers',   f'Row 4: {group_hdrs[:4]}', 'ok'),
+            ('Column headers',  f'Row 5: {subgrp_hdrs[:5]}', 'ok'),
+            ('Base row',        'Row 8 (Unweighted Base)', 'ok'),
+            ('Data start',      'Row 12 (Base row + 4, every 3 rows)', 'ok'),
+        ]
+        return {'matched_profile': 'Global Brand Identity v2',
+                'findings': findings, 'sample_columns': subgrp_hdrs, 'n_sheets': n_sheets}
 
     # Global Brand Identity
     if (len(r2) > 10
