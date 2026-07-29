@@ -93,20 +93,9 @@ def validate_format(file_bytes):
                        if v and str(v) not in ('nan','None'))
         except: return False
 
-    # Corporate Reputation (fmt6):
-    # Row 2 = descriptor ('Total sample'), row 3 = question, row 4 col 1 = Total
-    if len(raw) > 5:
-        r2   = cell(2, 0)
-        r3   = cell(3, 0)
-        r4c1 = cell(4, 1)
-        r5c1 = cell(5, 1)
-        if (len(r3) > 10
-                and ('total sample' in r2.lower() or 'weight' in r2.lower() or len(r2) < 50)
-                and ('total' in r4c1.lower() or 'total' in r5c1.lower())):
-            return "Corporate Reputation", 95
-
     # Global Brand Identity v2 (Meta UK):
     # Row 2 = "Table: N" (colon), row 3 = question, row 5 col 1 = Total
+    # Must come before Corporate Reputation — "Table: N" also satisfies len(r2)<50
     if len(raw) > 6:
         r2   = cell(2, 0)
         r3   = cell(3, 0)
@@ -114,6 +103,20 @@ def validate_format(file_bytes):
         if (r2.lower().startswith('table:') and len(r3) > 10
                 and 'total' in r5c1.lower()):
             return "Global Brand Identity v2", 92
+
+    # Corporate Reputation (fmt6):
+    # Row 2 = descriptor ('Total sample'), row 3 = question, row 4 col 1 = Total
+    # Exclude "Table:" format (that's GBI v2 above)
+    if len(raw) > 5:
+        r2   = cell(2, 0)
+        r3   = cell(3, 0)
+        r4c1 = cell(4, 1)
+        r5c1 = cell(5, 1)
+        if (len(r3) > 10
+                and not r2.lower().startswith('table:')
+                and ('total sample' in r2.lower() or 'weight' in r2.lower() or len(r2) < 50)
+                and ('total' in r4c1.lower() or 'total' in r5c1.lower())):
+            return "Corporate Reputation", 95
 
     # Global Brand Identity (fmt2):
     # Row 2 = question, row 3 col 0 or col 1 = Total, row 4 = sub-labels
