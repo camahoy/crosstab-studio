@@ -650,17 +650,27 @@ if st.session_state.scan_done:
         # Export format choice
         export_fmt = st.radio(
             "Export format",
-            ["Excel", "Media Release Template (Word)"],
+            ["Excel", "Standard Media Release Topline (Word)"],
             horizontal=True,
             label_visibility="collapsed",
         )
 
         survey_title = ''
-        if export_fmt == "Media Release Template (Word)":
+        methodology = sample_desc = interview_dates = sample_n = moe = ''
+        if export_fmt == "Standard Media Release Topline (Word)":
             survey_title = st.text_input(
-                "Survey title (appears in document header)",
-                placeholder="e.g. College Student Fall Mental Wellness Survey",
+                "Survey title",
+                placeholder="e.g. Ipsos Poll on Iran",
             )
+            with st.expander("Optional metadata (dates, N, MOE)", expanded=False):
+                methodology    = st.text_input("Methodology line", placeholder="Conducted by Ipsos using KnowledgePanel®")
+                sample_desc    = st.text_input("Sample description", placeholder="A survey of the American general population (ages 18+)")
+                interview_dates = st.text_input("Interview dates", placeholder="July 10-12, 2026")
+                col1, col2 = st.columns(2)
+                with col1:
+                    sample_n = st.text_input("Number of interviews", placeholder="1,019")
+                with col2:
+                    moe = st.text_input("Margin of error (±)", placeholder="3.7")
 
         btn_label = (
             f"◈  Generate Excel ({n_sel} questions)"
@@ -700,10 +710,14 @@ if st.session_state.scan_done:
                             col_names,
                             survey_title=survey_title,
                             include_types=st.session_state.include_types or None,
+                            methodology=methodology,
+                            sample_desc=sample_desc,
+                            interview_dates=interview_dates,
+                            sample_n=sample_n,
+                            moe=moe,
                         )
                         if err:
                             st.error(f"Word export failed: {err}")
-                            st.info("Make sure template_doc.docx is in the app root directory.")
                         else:
                             st.success(f"Done — {n_sel} questions exported")
                             st.download_button(

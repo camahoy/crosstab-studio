@@ -46,6 +46,7 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from docx.text.paragraph import Paragraph as DocxPara
 from docx.enum.section import WD_ORIENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 
 # ── Value coercion ────────────────────────────────────────────
@@ -930,7 +931,7 @@ def _write_word_table(doc, insert_after_para, question_wording,
                       col_names, base_vals, answers, values):
 
     q_para = _insert_para_after(insert_after_para, question_wording,
-                                 bold=True, size_pt=10, color=BRAND_COLOR)
+                                 bold=False, size_pt=10, color=RGBColor(0, 0, 0))
     spacer = _insert_para_after(q_para)
 
     n_cols = len(col_names)
@@ -943,15 +944,9 @@ def _write_word_table(doc, insert_after_para, question_wording,
     tblPr.append(tblW)
     tbl_el.append(tblPr)
 
-    def make_cell(text, bold=False, center=True, bg_hex=None, size_pt=9):
+    def make_cell(text, bold=False, center=True, size_pt=9):
         tc = OxmlElement('w:tc')
         tcPr = OxmlElement('w:tcPr')
-        if bg_hex:
-            shd = OxmlElement('w:shd')
-            shd.set(qn('w:val'), 'clear')
-            shd.set(qn('w:color'), 'auto')
-            shd.set(qn('w:fill'), bg_hex)
-            tcPr.append(shd)
         tc.append(tcPr)
         p = OxmlElement('w:p')
         pPr = OxmlElement('w:pPr')
@@ -963,9 +958,6 @@ def _write_word_table(doc, insert_after_para, question_wording,
         rPr = OxmlElement('w:rPr')
         if bold:
             b = OxmlElement('w:b'); rPr.append(b)
-        col_el = OxmlElement('w:color')
-        col_el.set(qn('w:val'), 'FFFFFF' if bg_hex == '2F469C' else '000000')
-        rPr.append(col_el)
         sz = OxmlElement('w:sz'); sz.set(qn('w:val'), str(size_pt * 2)); rPr.append(sz)
         r.append(rPr)
         t = OxmlElement('w:t')
@@ -975,59 +967,162 @@ def _write_word_table(doc, insert_after_para, question_wording,
         r.append(t); p.append(r); tc.append(p)
         return tc
 
+    # Header row: bold, no background fill
     hdr_tr = OxmlElement('w:tr')
-    hdr_tr.append(make_cell('', bold=True, center=True, bg_hex='2F469C'))
+    hdr_tr.append(make_cell('', bold=True, center=True))
     for ci, name in enumerate(col_names):
         bv   = base_vals[ci] if ci < len(base_vals) else None
         bstr = f'\n(N={int(bv):,})' if isinstance(bv, float) and bv else ''
-        hdr_tr.append(make_cell(name + bstr, bold=True, center=True, bg_hex='2F469C'))
+        hdr_tr.append(make_cell(name + bstr, bold=True, center=True))
     tbl_el.append(hdr_tr)
 
+    # Data rows: no shading
     for ri, answer in enumerate(answers):
         data_tr = OxmlElement('w:tr')
-        bg = 'F6F8FA' if ri % 2 == 0 else None
-        data_tr.append(make_cell(answer, bold=False, center=False, bg_hex=bg))
+        data_tr.append(make_cell(answer, bold=False, center=False))
         row_vals = values[ri] if ri < len(values) else []
         for ci in range(n_cols):
             v = row_vals[ci] if ci < len(row_vals) else None
-            data_tr.append(make_cell(_fmt_pct(v), center=True, bg_hex=bg))
+            data_tr.append(make_cell(_fmt_pct(v), center=True))
         tbl_el.append(data_tr)
 
     return tbl_el
 
 
 def generate_word(selections, files, profile_name, col_indices, col_names,
-                  survey_title='', include_types=None):
-    import os
-    if not os.path.exists(TEMPLATE_PATH):
-        return None, "template_doc.docx not found in app directory"
+                  survey_title='', include_types=None,
+                  methodology='', sample_desc='', interview_dates='',
+                  sample_n='', moe=''):
+    """
+    Build a Standard Media Release Topline Word document from scratch.
+    Matches the Ipsos topline format exactly: portrait 8.5×11" 1" margins,
+    teal title block, blue header, 3-col footer, clean tables.
+    """
+    doc = Document()
 
-    doc = Document(TEMPLATE_PATH)
-
-    # Force portrait orientation and correct margins regardless of template defaults
+    # ── Page setup ────────────────────────────────────────────────
     section = doc.sections[0]
-    section.orientation = WD_ORIENT.PORTRAIT
-    section.page_width  = Inches(8.5)
-    section.page_height = Inches(11)
-    section.top_margin    = Inches(1.5)
-    section.bottom_margin = Inches(0.5)
-    section.left_margin   = Inches(1.13)
-    section.right_margin  = Inches(1.17)
+    section.orientation   = WD_ORIENT.PORTRAIT
+    section.page_width    = Inches(8.5)
+    section.page_height   = Inches(11)
+    section.top_margin    = Inches(1.0)
+    section.bottom_margin = Inches(1.0)
+    section.left_margin   = Inches(1.0)
+    section.right_margin  = Inches(1.0)
 
-    title_para = doc.paragraphs[1]
-    for run in title_para.runs:
-        run.text = ''
-    if title_para.runs:
-        title_para.runs[0].text = survey_title or 'Topline Findings'
-    else:
-        _add_run(title_para, survey_title or 'Topline Findings',
-                 bold=True, color=BRAND_COLOR)
+    # ── Header: "\nTopline & METHODOLOGY" 16pt bold #2F469C ──────
+    h_para = section.header.paragraphs[0]
+    r1 = h_para.add_run('\n')
+    r1.bold = True; r1.font.size = Pt(16); r1.font.color.rgb = BRAND_COLOR
+    r2 = h_para.add_run('')
+    r2.font.size = Pt(14); r2.font.color.rgb = BRAND_COLOR
+    r3 = h_para.add_run('Topline & METHODOLOGY')
+    r3.bold = True; r3.font.size = Pt(16); r3.font.color.rgb = BRAND_COLOR
 
-    topline_para = next(
-        (p for p in doc.paragraphs if 'Topline' in p.text), doc.paragraphs[-1]
+    # ── Footer: 3-col table, 7pt #2F469C ─────────────────────────
+    footer = section.footer
+    # Remove default empty paragraph, insert table
+    fp = footer.paragraphs[0]
+    fp._element.getparent().remove(fp._element)
+    f_tbl = footer.add_table(rows=1, cols=3, style='Table Grid')
+    # Remove all table borders
+    fPr = f_tbl._tbl.get_or_add_tblPr()
+    fBorders = OxmlElement('w:tblBorders')
+    for side in ('top','left','bottom','right','insideH','insideV'):
+        b = OxmlElement(f'w:{side}')
+        b.set(qn('w:val'), 'none'); fBorders.append(b)
+    fPr.append(fBorders)
+
+    def _footer_lines(cell, lines, bold_first=False):
+        first = True
+        for line in lines:
+            p = cell.paragraphs[0] if first else cell.add_paragraph()
+            first = False
+            r = p.add_run(line)
+            r.font.size = Pt(7)
+            r.font.color.rgb = BRAND_COLOR
+            if bold_first and line == lines[0]:
+                r.bold = True
+
+    _footer_lines(f_tbl.cell(0, 0), [
+        '2020 K Street, NW, Suite 410',
+        'Washington DC 20006',
+        '+1 202 463-7300',
+    ])
+    _footer_lines(f_tbl.cell(0, 1), ['Contact:', '', 'Email:'])
+    _footer_lines(f_tbl.cell(0, 2), [
+        'Mallory Newall',
+        'VP, US, Public Affairs',
+        'mallory.newall@ipsos.com',
+    ], bold_first=True)
+
+    # ── Title block: white text on teal (#008E94) background ─────
+    title_para = doc.paragraphs[0]
+    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    pPr = title_para._element.get_or_add_pPr()
+    shd = OxmlElement('w:shd')
+    shd.set(qn('w:val'), 'clear')
+    shd.set(qn('w:color'), 'auto')
+    shd.set(qn('w:fill'), '008E94')
+    pPr.append(shd)
+    sp_el = OxmlElement('w:spacing')
+    sp_el.set(qn('w:after'), '0')
+    pPr.append(sp_el)
+    tr = title_para.add_run(survey_title or 'Topline Findings')
+    tr.bold = True; tr.font.size = Pt(12)
+    tr.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+
+    # ── Body helper ───────────────────────────────────────────────
+    def _body_para(text='', bold=False, center=True, color=None, size_pt=None):
+        p = doc.add_paragraph()
+        p.alignment = (WD_ALIGN_PARAGRAPH.CENTER if center
+                       else WD_ALIGN_PARAGRAPH.LEFT)
+        pPr2 = p._element.get_or_add_pPr()
+        sp2 = OxmlElement('w:spacing'); sp2.set(qn('w:after'), '0'); pPr2.append(sp2)
+        if text:
+            r = p.add_run(text)
+            r.bold = bold
+            if size_pt: r.font.size = Pt(size_pt)
+            if color:   r.font.color.rgb = color
+        return p
+
+    _body_para()  # blank line after title
+
+    if methodology:
+        _body_para(methodology, center=True)
+    if sample_desc:
+        _body_para(sample_desc, bold=True, center=True)
+    if interview_dates:
+        _body_para(f'Interview dates: {interview_dates}', center=True)
+    if sample_n:
+        _body_para(f'Number of interviews: {sample_n}', center=True)
+    if any([methodology, sample_desc, interview_dates, sample_n]):
+        _body_para()
+    if moe:
+        _body_para(
+            f'Margin of error: +/- {moe} percentage points at the 95% confidence '
+            'level for all respondents',
+            center=True,
+        )
+        _body_para()
+
+    _body_para(
+        'NOTE: All results show percentages among all respondents, unless otherwise '
+        'labeled. Reduced bases are unweighted values.',
+        center=False,
     )
-    insert_after = topline_para
+    _body_para()
+    _body_para(
+        'NOTE: * = less than 0.5%, - = no respondents, N/A = not applicable',
+        center=False,
+    )
+    _body_para()
+    last_para = _body_para('Annotated Questionnaire', bold=True, center=False,
+                            color=BRAND_COLOR)
+    _body_para()
+    insert_after = last_para
 
+    # ── Tables ────────────────────────────────────────────────────
     for sel in selections:
         prefix = sel['prefix']
         for fi, finfo in enumerate(files):
@@ -1035,16 +1130,15 @@ def generate_word(selections, files, profile_name, col_indices, col_names,
                 finfo['bytes'], prefix, profile_name, col_indices, include_types)
             if parsed_list:
                 for p in parsed_list:
-                    title  = (f"{p['wording']}  —  {finfo['label']}"
-                              if len(files) > 1 else p['wording'])
+                    title = (f"{p['wording']}  —  {finfo['label']}"
+                             if len(files) > 1 else p['wording'])
                     tbl_el = _write_word_table(doc, insert_after, title,
                                                col_names, p['base_vals'],
                                                p['answers'], p['values'])
                     spacer_el = OxmlElement('w:p')
                     tbl_el.addnext(spacer_el)
-                    insert_after = DocxPara(spacer_el, topline_para._parent)
+                    insert_after = DocxPara(spacer_el, insert_after._parent)
             elif len(files) > 1:
-                # Placeholder paragraph for missing wave
                 na_para = _insert_para_after(
                     insert_after,
                     f"{finfo['label']}  —  not available in this file",
