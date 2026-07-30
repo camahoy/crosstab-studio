@@ -154,6 +154,17 @@ def validate_format(file_bytes):
             if has_base_weighted:
                 return "KP Omni", 92
 
+    # Consumer Tracker: dual base rows — unweighted at row 6, weighted at row 8
+    # Row 1 = question, row 3 col 1 = "Total", letter codes at row 4
+    if len(raw) > 9:
+        r6c0 = cell(6, 0)
+        r8c0 = cell(8, 0)
+        r3c1 = cell(3, 1)
+        if (('unwtd' in r6c0.lower() or 'unweighted' in r6c0.lower())
+                and ('wtd' in r8c0.lower() or 'weighted' in r8c0.lower())
+                and 'total' in r3c1.lower()):
+            return "Consumer Tracker", 97
+
     # KP: row 2 = question, Total somewhere in row 1
     if len(raw) > 3:
         r2 = cell(2, 0)
@@ -1463,6 +1474,12 @@ def detect_and_describe(file_bytes):
             if c2.lower().startswith('table ') and len(c4) > 10:
                 ref_si = si; ref_raw = raw; break
 
+            # Consumer Tracker: row 1 = question, row 6 = unwtd base
+            c1_ct = str(raw[1][0]).strip() if len(raw) > 1 and raw[1] and raw[1][0] else ''
+            c6    = str(raw[6][0]).strip() if len(raw) > 6 and raw[6] and raw[6][0] else ''
+            if len(c1_ct) > 10 and ('unwtd' in c6.lower() or 'unweighted' in c6.lower()):
+                ref_si = si; ref_raw = raw; break
+
             # Other formats: row 2 has real question wording (long string)
             if len(c2) > 10 and not c2.lower().startswith('sheet') and not c2.lower().startswith('table'):
                 ref_si = si; ref_raw = raw; break
@@ -1548,6 +1565,30 @@ def detect_and_describe(file_bytes):
             ('Data start',         'Row 12 (every 3 rows)', 'ok'),
         ]
         return {'matched_profile': 'Corporate Reputation',
+                'findings': findings, 'sample_columns': cols, 'n_sheets': n_sheets}
+
+    # Consumer Tracker: dual base rows — unwtd at row 6, wtd at row 8
+    # Row 1 = question, row 3 col 1 = Total, row 4 = letter codes
+    r6c0 = cell(6, 0)
+    r8c0 = cell(8, 0)
+    if (('unwtd' in r6c0.lower() or 'unweighted' in r6c0.lower())
+            and ('wtd' in r8c0.lower() or 'weighted' in r8c0.lower())
+            and 'total' in cell(3, 1).lower()):
+        r3_data = ref_raw[3] if len(ref_raw) > 3 else []
+        r2_data = ref_raw[2] if len(ref_raw) > 2 else []
+        cols = [str(v).strip() for v in r3_data[1:]
+                if v and str(v) not in ('nan', 'None', '\xa0')]
+        groups = [str(v).strip() for v in r2_data[1:]
+                  if v and str(v) not in ('nan', 'None', '\xa0', ' ')]
+        findings += [
+            ('Question wording', f'Row 1: "{r1[:50]}"', 'ok'),
+            ('Group headers',    f'Row 2: {groups[:4]}', 'ok'),
+            ('Column headers',   f'Row 3: {cols[:4]}', 'ok'),
+            ('Unwtd base row',   f'Row 6: "{r6c0[:40]}"', 'ok'),
+            ('Wtd base row',     f'Row 8: "{r8c0[:40]}"', 'ok'),
+            ('Data start',       'Row 10 (every 3 rows, decimals → %)', 'ok'),
+        ]
+        return {'matched_profile': 'Consumer Tracker',
                 'findings': findings, 'sample_columns': cols, 'n_sheets': n_sheets}
 
     # IData: row 2 = question, row 3 col 0 blank (group headers), row 4 col 1 = Total
