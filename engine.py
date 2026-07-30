@@ -1020,163 +1020,126 @@ def _write_word_table(doc, insert_after_para, question_wording,
     return tbl_el
 
 
+_TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template_topline.docx')
+_TEMPLATE_CACHE: bytes | None = None
+
+
+def _fetch_template() -> bytes:
+    """Load the portrait Ipsos topline template (cached in memory)."""
+    global _TEMPLATE_CACHE
+    if _TEMPLATE_CACHE is not None:
+        return _TEMPLATE_CACHE
+    try:
+        with open(_TEMPLATE_PATH, 'rb') as f:
+            _TEMPLATE_CACHE = f.read()
+    except Exception as e:
+        raise RuntimeError(f'Could not load Word template: {e}') from e
+    return _TEMPLATE_CACHE
+
+
+def _set_para_text(para, text, bold=None, color=None):
+    """Replace all runs in a paragraph with a single run, preserving paragraph formatting."""
+    from docx.oxml.ns import qn as _qn
+    p_el = para._element
+    for r in p_el.findall(_qn('w:r')):
+        p_el.remove(r)
+    if not text:
+        return
+    run = para.add_run(text)
+    if bold is not None:
+        run.bold = bold
+    if color is not None:
+        run.font.color.rgb = color
+
+
 def generate_word(selections, files, profile_name, col_indices, col_names,
                   survey_title='', include_types=None,
                   methodology='', sample_desc='', interview_dates='',
                   sample_n='', moe=''):
     """
-    Build a Standard Media Release Topline Word document from scratch.
-    Matches the Ipsos topline format exactly: portrait 8.5×11" 1" margins,
-    teal title block, blue header, 3-col footer, clean tables.
+    Build a Standard Media Release Topline Word document.
+    Downloads the portrait Ipsos template from Google Drive, fills in the
+    variable fields (title, dates, N, MOE, methodology), then appends tables
+    after the 'Annotated Questionnaire' paragraph.
     """
-    doc = Document()
+    try:
+        tmpl_bytes = _fetch_template()
+        doc = Document(io.BytesIO(tmpl_bytes))
+    except Exception as e:
+        return None, f'Export failed: {e}'
 
-    # ── Page setup ────────────────────────────────────────────────
-    section = doc.sections[0]
-    section.orientation   = WD_ORIENT.PORTRAIT
-    section.page_width    = Inches(8.5)
-    section.page_height   = Inches(11)
-    section.top_margin    = Inches(1.0)
-    section.bottom_margin = Inches(1.0)
-    section.left_margin   = Inches(1.0)
-    section.right_margin  = Inches(1.0)
+    # ── Find key paragraphs by index and content ──────────────────
+    # Template body paragraph structure (0-indexed, matching Iran topline):
+    #   0  — survey title (teal background)
+    #   1  — blank
+    #   2  — methodology ("Conducted by Ipsos...")
+    #   3  — sample_desc (bold)
+    #   4  — interview dates
+    #   5  — number of interviews
+    #   6  — blank
+    #   7  — margin of error
+    #   8  — blank
+    #   9  — NOTE: All results...
+    #  10  — blank
+    #  11  — NOTE: * = less than...
+    #  12  — blank
+    #  13  — Annotated Questionnaire (bold blue)
+    #  14+ — tables start here
 
-    # ── Header: "\nTopline & METHODOLOGY" 16pt bold #2F469C ──────
-    h_para = section.header.paragraphs[0]
-    r1 = h_para.add_run('\n')
-    r1.bold = True; r1.font.size = Pt(16); r1.font.color.rgb = BRAND_COLOR
-    r2 = h_para.add_run('')
-    r2.font.size = Pt(14); r2.font.color.rgb = BRAND_COLOR
-    r3 = h_para.add_run('Topline & METHODOLOGY')
-    r3.bold = True; r3.font.size = Pt(16); r3.font.color.rgb = BRAND_COLOR
+    paras = doc.paragraphs
 
-    # ── Footer: 3-col table built with raw XML (version-agnostic) ──
-    footer = section.footer
-    fp = footer.paragraphs[0]
+    def _para_at(idx):
+        return paras[idx] if idx < len(paras) else None
 
-    # Column widths matching Iran topline reference exactly (in dxa)
-    _FOOTER_COL_WIDTHS = ('1983', '668', '2660')
+    # Replace survey title (P0)
+    p0 = _para_at(0)
+    if p0 is not None:
+        _set_para_text(p0, survey_title or 'Topline Findings',
+                       bold=True, color=RGBColor(0xFF, 0xFF, 0xFF))
 
-    def _make_footer_cell(col_lines, col_w, bold_first=False):
-        tc = OxmlElement('w:tc')
-        tcPr = OxmlElement('w:tcPr')
-        tcW = OxmlElement('w:tcW')
-        tcW.set(qn('w:w'), col_w); tcW.set(qn('w:type'), 'dxa')
-        tcPr.append(tcW)
-        tcBorders = OxmlElement('w:tcBorders')
-        for side in ('top','left','bottom','right'):
-            b = OxmlElement(f'w:{side}')
-            b.set(qn('w:val'), 'none'); tcBorders.append(b)
-        tcPr.append(tcBorders)
-        tc.append(tcPr)
-        for li, line in enumerate(col_lines):
-            p = OxmlElement('w:p')
-            pPr = OxmlElement('w:pPr')
-            sp = OxmlElement('w:spacing'); sp.set(qn('w:after'), '0'); pPr.append(sp)
-            p.append(pPr)
-            if line:
-                r = OxmlElement('w:r')
-                rPr = OxmlElement('w:rPr')
-                sz = OxmlElement('w:sz'); sz.set(qn('w:val'), '14'); rPr.append(sz)  # 7pt
-                col_el = OxmlElement('w:color'); col_el.set(qn('w:val'), '2F469C'); rPr.append(col_el)
-                if bold_first and li == 0:
-                    b = OxmlElement('w:b'); rPr.append(b)
-                r.append(rPr)
-                t = OxmlElement('w:t'); t.text = line; r.append(t)
-                p.append(r)
-            tc.append(p)
-        return tc
-
-    f_tr = OxmlElement('w:tr')
-    f_tr.append(_make_footer_cell(['2020 K Street, NW, Suite 410', 'Washington DC 20006', '+1 202 463-7300'], _FOOTER_COL_WIDTHS[0]))
-    f_tr.append(_make_footer_cell(['Contact:', '', 'Email:'], _FOOTER_COL_WIDTHS[1]))
-    f_tr.append(_make_footer_cell(['Mallory Newall', 'VP, US, Public Affairs', 'mallory.newall@ipsos.com'], _FOOTER_COL_WIDTHS[2], bold_first=True))
-
-    f_tbl = OxmlElement('w:tbl')
-    tblPr = OxmlElement('w:tblPr')
-    tblStyle = OxmlElement('w:tblStyle'); tblStyle.set(qn('w:val'), 'a'); tblPr.append(tblStyle)
-    tblW = OxmlElement('w:tblW'); tblW.set(qn('w:w'), '5311'); tblW.set(qn('w:type'), 'dxa')
-    tblPr.append(tblW)
-    tblBorders = OxmlElement('w:tblBorders')
-    for side in ('top','left','bottom','right','insideH','insideV'):
-        b = OxmlElement(f'w:{side}'); b.set(qn('w:val'), 'nil'); tblBorders.append(b)
-    tblPr.append(tblBorders)
-    tblLayout = OxmlElement('w:tblLayout'); tblLayout.set(qn('w:type'), 'fixed'); tblPr.append(tblLayout)
-    f_tbl.append(tblPr)
-    tblGrid = OxmlElement('w:tblGrid')
-    for w in _FOOTER_COL_WIDTHS:
-        gc = OxmlElement('w:gridCol'); gc.set(qn('w:w'), w); tblGrid.append(gc)
-    f_tbl.append(tblGrid)
-    f_tbl.append(f_tr)
-    fp._element.addnext(f_tbl)
-
-    # ── Title block: white text on teal (#008E94) background ─────
-    title_para = doc.paragraphs[0] if doc.paragraphs else doc.add_paragraph()
-    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    pPr = title_para._element.get_or_add_pPr()
-    shd = OxmlElement('w:shd')
-    shd.set(qn('w:val'), 'clear')
-    shd.set(qn('w:color'), 'auto')
-    shd.set(qn('w:fill'), '008E94')
-    pPr.append(shd)
-    sp_el = OxmlElement('w:spacing')
-    sp_el.set(qn('w:after'), '0')
-    pPr.append(sp_el)
-    tr = title_para.add_run(survey_title or 'Topline Findings')
-    tr.bold = True; tr.font.size = Pt(12)
-    tr.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-
-    # ── Body helper ───────────────────────────────────────────────
-    def _body_para(text='', bold=False, center=True, color=None, size_pt=None):
-        p = doc.add_paragraph()
-        p.alignment = (WD_ALIGN_PARAGRAPH.CENTER if center
-                       else WD_ALIGN_PARAGRAPH.LEFT)
-        pPr2 = p._element.get_or_add_pPr()
-        sp2 = OxmlElement('w:spacing'); sp2.set(qn('w:after'), '0'); pPr2.append(sp2)
-        if text:
-            r = p.add_run(text)
-            r.bold = bold
-            if size_pt: r.font.size = Pt(size_pt)
-            if color:   r.font.color.rgb = color
-        return p
-
-    _body_para()  # blank line after title
-
+    # Replace variable body paragraphs when the user supplied values
     if methodology:
-        _body_para(methodology, center=True)
+        p = _para_at(2)
+        if p is not None:
+            _set_para_text(p, methodology)
     if sample_desc:
-        _body_para(sample_desc, bold=True, center=True)
+        p = _para_at(3)
+        if p is not None:
+            _set_para_text(p, sample_desc, bold=True)
     if interview_dates:
-        _body_para(f'Interview dates: {interview_dates}', center=True)
+        p = _para_at(4)
+        if p is not None:
+            _set_para_text(p, f'Interview dates: {interview_dates}')
     if sample_n:
-        _body_para(f'Number of interviews: {sample_n}', center=True)
-    if any([methodology, sample_desc, interview_dates, sample_n]):
-        _body_para()
+        p = _para_at(5)
+        if p is not None:
+            _set_para_text(p, f'Number of interviews: {sample_n}')
     if moe:
-        _body_para(
-            f'Margin of error: +/- {moe} percentage points at the 95% confidence '
-            'level for all respondents',
-            center=True,
-        )
-        _body_para()
+        p = _para_at(7)
+        if p is not None:
+            _set_para_text(
+                p,
+                f'Margin of error: +/- {moe} percentage points at the 95% '
+                'confidence level for all respondents',
+            )
 
-    _body_para(
-        'NOTE: All results show percentages among all respondents, unless otherwise '
-        'labeled. Reduced bases are unweighted values.',
-        center=False,
-    )
-    _body_para()
-    _body_para(
-        'NOTE: * = less than 0.5%, - = no respondents, N/A = not applicable',
-        center=False,
-    )
-    _body_para()
-    last_para = _body_para('Annotated Questionnaire', bold=True, center=False,
-                            color=BRAND_COLOR)
-    _body_para()
-    insert_after = last_para
+    # ── Find "Annotated Questionnaire" paragraph as insertion point ─
+    insert_after = None
+    for para in doc.paragraphs:
+        if 'annotated questionnaire' in para.text.lower():
+            insert_after = para
+            break
 
-    # ── Tables ────────────────────────────────────────────────────
+    if insert_after is None:
+        # Fallback: use the last paragraph
+        insert_after = doc.paragraphs[-1] if doc.paragraphs else doc.add_paragraph()
+
+    # blank line between heading and first table
+    spacer_el = OxmlElement('w:p')
+    insert_after._element.addnext(spacer_el)
+    insert_after = DocxPara(spacer_el, insert_after._parent)
+
+    # ── Append tables ─────────────────────────────────────────────
     for sel in selections:
         prefix = sel['prefix']
         for fi, finfo in enumerate(files):
