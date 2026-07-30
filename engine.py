@@ -1020,28 +1020,32 @@ def _write_word_table(doc, insert_after_para, question_wording,
     return tbl_el
 
 
-_TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'template_topline.docx')
-_TEMPLATE_CACHE: bytes | None = None
+_TEMPLATE_DIR = os.path.dirname(os.path.abspath(__file__))
+_TEMPLATE_FILES = {
+    'standard':    'template_topline.docx',
+    'public_poll': 'template_public_poll.docx',
+}
+_TEMPLATE_CACHE: dict = {}
 
 
-def _fetch_template() -> bytes:
-    """Load the portrait Ipsos topline template (cached in memory)."""
-    global _TEMPLATE_CACHE
-    if _TEMPLATE_CACHE is not None:
-        return _TEMPLATE_CACHE
+def _fetch_template(name: str = 'standard') -> bytes:
+    """Load a named template docx (cached in memory)."""
+    if name in _TEMPLATE_CACHE:
+        return _TEMPLATE_CACHE[name]
+    filename = _TEMPLATE_FILES.get(name, _TEMPLATE_FILES['standard'])
+    path = os.path.join(_TEMPLATE_DIR, filename)
     try:
-        with open(_TEMPLATE_PATH, 'rb') as f:
-            _TEMPLATE_CACHE = f.read()
+        with open(path, 'rb') as f:
+            _TEMPLATE_CACHE[name] = f.read()
     except Exception as e:
-        raise RuntimeError(f'Could not load Word template: {e}') from e
-    return _TEMPLATE_CACHE
+        raise RuntimeError(f'Could not load Word template "{name}": {e}') from e
+    return _TEMPLATE_CACHE[name]
 
 
 def _set_para_text(para, text, bold=None, color=None):
     """Replace all runs in a paragraph with a single run, preserving paragraph formatting."""
-    from docx.oxml.ns import qn as _qn
     p_el = para._element
-    for r in p_el.findall(_qn('w:r')):
+    for r in p_el.findall(qn('w:r')):
         p_el.remove(r)
     if not text:
         return
@@ -1055,91 +1059,115 @@ def _set_para_text(para, text, bold=None, color=None):
 def generate_word(selections, files, profile_name, col_indices, col_names,
                   survey_title='', include_types=None,
                   methodology='', sample_desc='', interview_dates='',
-                  sample_n='', moe=''):
+                  sample_n='', moe='',
+                  template='standard'):
     """
-    Build a Standard Media Release Topline Word document.
-    Downloads the portrait Ipsos template from Google Drive, fills in the
-    variable fields (title, dates, N, MOE, methodology), then appends tables
-    after the 'Annotated Questionnaire' paragraph.
+    Build an Ipsos topline Word document from a named template.
+
+    template='standard'    — Standard Media Release Topline
+        Fills: survey title (P0), methodology (P2), sample_desc (P3),
+               interview_dates (P4), sample_n (P5), moe (P7).
+        Tables insert after 'Annotated Questionnaire'.
+
+    template='public_poll' — Public Poll Topline
+        Fills: survey title (P0), methodology (P2 — location/date line).
+        Tables insert before 'About Ipsos'.
+        About Ipsos section preserved at end.
     """
     try:
-        tmpl_bytes = _fetch_template()
+        tmpl_bytes = _fetch_template(template)
         doc = Document(io.BytesIO(tmpl_bytes))
     except Exception as e:
         return None, f'Export failed: {e}'
-
-    # ── Find key paragraphs by index and content ──────────────────
-    # Template body paragraph structure (0-indexed, matching Iran topline):
-    #   0  — survey title (teal background)
-    #   1  — blank
-    #   2  — methodology ("Conducted by Ipsos...")
-    #   3  — sample_desc (bold)
-    #   4  — interview dates
-    #   5  — number of interviews
-    #   6  — blank
-    #   7  — margin of error
-    #   8  — blank
-    #   9  — NOTE: All results...
-    #  10  — blank
-    #  11  — NOTE: * = less than...
-    #  12  — blank
-    #  13  — Annotated Questionnaire (bold blue)
-    #  14+ — tables start here
 
     paras = doc.paragraphs
 
     def _para_at(idx):
         return paras[idx] if idx < len(paras) else None
 
-    # Replace survey title (P0)
-    p0 = _para_at(0)
-    if p0 is not None:
-        _set_para_text(p0, survey_title or 'Topline Findings',
-                       bold=True, color=RGBColor(0xFF, 0xFF, 0xFF))
+    if template == 'standard':
+        # ── Standard Media Release Topline ────────────────────────
+        # P0  survey title (white text on teal)
+        # P2  methodology
+        # P3  sample_desc (bold)
+        # P4  interview dates
+        # P5  number of interviews
+        # P7  margin of error
+        # P13 Annotated Questionnaire → insert tables after this
 
-    # Replace variable body paragraphs when the user supplied values
-    if methodology:
-        p = _para_at(2)
-        if p is not None:
-            _set_para_text(p, methodology)
-    if sample_desc:
-        p = _para_at(3)
-        if p is not None:
-            _set_para_text(p, sample_desc, bold=True)
-    if interview_dates:
-        p = _para_at(4)
-        if p is not None:
-            _set_para_text(p, f'Interview dates: {interview_dates}')
-    if sample_n:
-        p = _para_at(5)
-        if p is not None:
-            _set_para_text(p, f'Number of interviews: {sample_n}')
-    if moe:
-        p = _para_at(7)
-        if p is not None:
-            _set_para_text(
-                p,
-                f'Margin of error: +/- {moe} percentage points at the 95% '
-                'confidence level for all respondents',
-            )
+        p0 = _para_at(0)
+        if p0 is not None:
+            _set_para_text(p0, survey_title or 'Topline Findings',
+                           bold=True, color=RGBColor(0xFF, 0xFF, 0xFF))
+        if methodology:
+            p = _para_at(2)
+            if p is not None:
+                _set_para_text(p, methodology)
+        if sample_desc:
+            p = _para_at(3)
+            if p is not None:
+                _set_para_text(p, sample_desc, bold=True)
+        if interview_dates:
+            p = _para_at(4)
+            if p is not None:
+                _set_para_text(p, f'Interview dates: {interview_dates}')
+        if sample_n:
+            p = _para_at(5)
+            if p is not None:
+                _set_para_text(p, f'Number of interviews: {sample_n}')
+        if moe:
+            p = _para_at(7)
+            if p is not None:
+                _set_para_text(
+                    p,
+                    f'Margin of error: +/- {moe} percentage points at the 95% '
+                    'confidence level for all respondents',
+                )
 
-    # ── Find "Annotated Questionnaire" paragraph as insertion point ─
-    insert_after = None
-    for para in doc.paragraphs:
-        if 'annotated questionnaire' in para.text.lower():
-            insert_after = para
-            break
+        # Find "Annotated Questionnaire" → insert tables after it
+        insert_after = None
+        for para in doc.paragraphs:
+            if 'annotated questionnaire' in para.text.lower():
+                insert_after = para
+                break
+        if insert_after is None:
+            insert_after = doc.paragraphs[-1] if doc.paragraphs else doc.add_paragraph()
 
-    if insert_after is None:
-        # Fallback: use the last paragraph
-        insert_after = doc.paragraphs[-1] if doc.paragraphs else doc.add_paragraph()
+    else:
+        # ── Public Poll Topline ───────────────────────────────────
+        # P0  survey title (bold blue, no background)
+        # P1  blank
+        # P2  location/date line (from methodology field)
+        # P3+ About Ipsos → insert tables BEFORE it
 
-    # blank line between heading and first table
+        p0 = _para_at(0)
+        if p0 is not None:
+            _set_para_text(p0, survey_title or 'Ipsos Poll')
+        if methodology:
+            p = _para_at(2)
+            if p is not None:
+                _set_para_text(p, methodology)
+
+        # Find "About Ipsos" → insert tables immediately before it
+        about_para = None
+        for para in doc.paragraphs:
+            if 'about ipsos' in para.text.lower():
+                about_para = para
+                break
+
+        if about_para is not None:
+            # Insert a blank spacer before "About Ipsos" and use the para before it
+            spacer_el = OxmlElement('w:p')
+            about_para._element.addprevious(spacer_el)
+            insert_after = DocxPara(spacer_el, about_para._parent)
+        else:
+            insert_after = doc.paragraphs[-1] if doc.paragraphs else doc.add_paragraph()
+
+    # ── Shared: add blank spacer then tables ──────────────────────
     spacer_el = OxmlElement('w:p')
     insert_after._element.addnext(spacer_el)
     insert_after = DocxPara(spacer_el, insert_after._parent)
 
-    # ── Append tables ─────────────────────────────────────────────
     for sel in selections:
         prefix = sel['prefix']
         for fi, finfo in enumerate(files):

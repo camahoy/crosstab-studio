@@ -650,27 +650,41 @@ if st.session_state.scan_done:
         # Export format choice
         export_fmt = st.radio(
             "Export format",
-            ["Excel", "Standard Media Release Topline (Word)"],
+            ["Excel", "Standard Media Release Topline (Word)", "Public Poll Topline (Word)"],
             horizontal=True,
             label_visibility="collapsed",
         )
 
         survey_title = ''
         methodology = sample_desc = interview_dates = sample_n = moe = ''
+        word_template = 'standard'
+
         if export_fmt == "Standard Media Release Topline (Word)":
+            word_template = 'standard'
             survey_title = st.text_input(
                 "Survey title",
                 placeholder="e.g. Ipsos Poll on Iran",
             )
             with st.expander("Optional metadata (dates, N, MOE)", expanded=False):
-                methodology    = st.text_input("Methodology line", placeholder="Conducted by Ipsos using KnowledgePanel®")
-                sample_desc    = st.text_input("Sample description", placeholder="A survey of the American general population (ages 18+)")
+                methodology     = st.text_input("Methodology line", placeholder="Conducted by Ipsos using KnowledgePanel®")
+                sample_desc     = st.text_input("Sample description", placeholder="A survey of the American general population (ages 18+)")
                 interview_dates = st.text_input("Interview dates", placeholder="July 10-12, 2026")
                 col1, col2 = st.columns(2)
                 with col1:
                     sample_n = st.text_input("Number of interviews", placeholder="1,019")
                 with col2:
                     moe = st.text_input("Margin of error (±)", placeholder="3.7")
+
+        elif export_fmt == "Public Poll Topline (Word)":
+            word_template = 'public_poll'
+            survey_title = st.text_input(
+                "Survey title",
+                placeholder="e.g. Ipsos Poll on Consumer Behavior",
+            )
+            methodology = st.text_input(
+                "Location & date",
+                placeholder="e.g. Washington, DC, July 31, 2026",
+            )
 
         btn_label = (
             f"◈  Generate Excel ({n_sel} questions)"
@@ -715,6 +729,7 @@ if st.session_state.scan_done:
                             interview_dates=interview_dates,
                             sample_n=sample_n,
                             moe=moe,
+                            template=word_template,
                         )
                         if err:
                             st.error(f"Word export failed: {err}")
