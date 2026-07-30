@@ -93,6 +93,16 @@ def validate_format(file_bytes):
                        if v and str(v) not in ('nan','None'))
         except: return False
 
+    # Global Brand Identity v3 (AU variant):
+    # Row 1 = "Table: N" (colon), row 2 = question, row 4 = subgroup names
+    # No "(Weighted)" row between project name and table marker
+    if len(raw) > 5:
+        r1   = cell(1, 0)
+        r2   = cell(2, 0)
+        r4c1 = cell(4, 1)
+        if r1.lower().startswith('table:') and len(r2) > 10 and r4c1:
+            return "Global Brand Identity v3", 92
+
     # Global Brand Identity v2 (Meta UK):
     # Row 2 = "Table: N" (colon), row 3 = question, row 5 col 1 = Total
     # Must come before Corporate Reputation — "Table: N" also satisfies len(r2)<50
@@ -1407,6 +1417,11 @@ def detect_and_describe(file_bytes):
             if 'back to' in r0c1_check.lower() and len(c4) > 10:
                 ref_si = si; ref_raw = raw; break
 
+            # GBI v3: row 1 = "Table: N" (colon), row 2 = question
+            c1 = str(raw[1][0]).strip() if len(raw) > 1 and raw[1] and raw[1][0] else ''
+            if c1.lower().startswith('table:') and len(c2) > 10:
+                ref_si = si; ref_raw = raw; break
+
             # GBI v2: row 2 = "Table: N" (colon), row 3 = question
             c3 = str(raw[3][0]).strip() if len(raw) > 3 and raw[3] and raw[3][0] else ''
             if c2.lower().startswith('table:') and len(c3) > 10:
@@ -1521,6 +1536,27 @@ def detect_and_describe(file_bytes):
         ]
         return {'matched_profile': 'IData',
                 'findings': findings, 'sample_columns': cols, 'n_sheets': n_sheets}
+
+    r1 = cell(1, 0)
+
+    # Global Brand Identity v3 (AU): row 1 = "Table: N" (colon), question at row 2
+    if r1.lower().startswith('table:') and len(r2) > 10:
+        r3_data = ref_raw[3] if len(ref_raw) > 3 else []
+        r4_data = ref_raw[4] if len(ref_raw) > 4 else []
+        group_hdrs  = [str(v).strip() for v in r3_data[1:]
+                       if v and str(v) not in ('nan','None','\xa0')]
+        subgrp_hdrs = [str(v).strip() for v in r4_data[1:]
+                       if v and str(v) not in ('nan','None','\xa0')]
+        findings += [
+            ('Detection',       f'Row 1: "{r1}" (Table: colon, no Weighted row)', 'ok'),
+            ('Question wording', f'Row 2: "{r2[:50]}"', 'ok'),
+            ('Group headers',   f'Row 3: {group_hdrs[:4]}', 'ok'),
+            ('Column headers',  f'Row 4: {subgrp_hdrs[:5]}', 'ok'),
+            ('Base row',        'Row 7 (Unweighted Base)', 'ok'),
+            ('Data start',      'Row 11 (Base row + 4, every 3 rows)', 'ok'),
+        ]
+        return {'matched_profile': 'Global Brand Identity v3',
+                'findings': findings, 'sample_columns': subgrp_hdrs, 'n_sheets': n_sheets}
 
     # Global Brand Identity v2 (Meta UK): row 2 = "Table: N" (colon), question at row 3
     r5_data = ref_raw[5] if len(ref_raw) > 5 else []
