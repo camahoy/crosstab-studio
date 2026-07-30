@@ -1037,7 +1037,7 @@ def generate_word(selections, files, profile_name, col_indices, col_names,
     # Remove default empty paragraph, insert table
     fp = footer.paragraphs[0]
     fp._element.getparent().remove(fp._element)
-    f_tbl = footer.add_table(rows=1, cols=3, style='Table Grid')
+    f_tbl = footer.add_table(rows=1, cols=3)
     # Remove all table borders
     fPr = f_tbl._tbl.get_or_add_tblPr()
     fBorders = OxmlElement('w:tblBorders')
