@@ -1032,42 +1032,57 @@ def generate_word(selections, files, profile_name, col_indices, col_names,
     r3 = h_para.add_run('Topline & METHODOLOGY')
     r3.bold = True; r3.font.size = Pt(16); r3.font.color.rgb = BRAND_COLOR
 
-    # ── Footer: 3-col table, 7pt #2F469C ─────────────────────────
+    # ── Footer: 3-col table built with raw XML (version-agnostic) ──
     footer = section.footer
-    # Remove default empty paragraph, insert table
     fp = footer.paragraphs[0]
-    fp._element.getparent().remove(fp._element)
-    f_tbl = footer.add_table(rows=1, cols=3)
-    # Remove all table borders
-    fPr = f_tbl._tbl.get_or_add_tblPr()
-    fBorders = OxmlElement('w:tblBorders')
+
+    def _make_footer_cell(col_lines, bold_first=False):
+        tc = OxmlElement('w:tc')
+        tcPr = OxmlElement('w:tcPr')
+        tcW = OxmlElement('w:tcW')
+        tcW.set(qn('w:w'), '2160'); tcW.set(qn('w:type'), 'dxa')
+        tcPr.append(tcW)
+        # No cell borders
+        tcBorders = OxmlElement('w:tcBorders')
+        for side in ('top','left','bottom','right'):
+            b = OxmlElement(f'w:{side}')
+            b.set(qn('w:val'), 'none'); tcBorders.append(b)
+        tcPr.append(tcBorders)
+        tc.append(tcPr)
+        for li, line in enumerate(col_lines):
+            p = OxmlElement('w:p')
+            pPr = OxmlElement('w:pPr')
+            sp = OxmlElement('w:spacing'); sp.set(qn('w:after'), '0'); pPr.append(sp)
+            p.append(pPr)
+            if line:
+                r = OxmlElement('w:r')
+                rPr = OxmlElement('w:rPr')
+                sz = OxmlElement('w:sz'); sz.set(qn('w:val'), '14'); rPr.append(sz)  # 7pt
+                col_el = OxmlElement('w:color'); col_el.set(qn('w:val'), '2F469C'); rPr.append(col_el)
+                if bold_first and li == 0:
+                    b = OxmlElement('w:b'); rPr.append(b)
+                r.append(rPr)
+                t = OxmlElement('w:t'); t.text = line; r.append(t)
+                p.append(r)
+            tc.append(p)
+        return tc
+
+    f_tr = OxmlElement('w:tr')
+    f_tr.append(_make_footer_cell(['2020 K Street, NW, Suite 410', 'Washington DC 20006', '+1 202 463-7300']))
+    f_tr.append(_make_footer_cell(['Contact:', '', 'Email:']))
+    f_tr.append(_make_footer_cell(['Mallory Newall', 'VP, US, Public Affairs', 'mallory.newall@ipsos.com'], bold_first=True))
+
+    f_tbl = OxmlElement('w:tbl')
+    tblPr = OxmlElement('w:tblPr')
+    tblW = OxmlElement('w:tblW'); tblW.set(qn('w:w'), '0'); tblW.set(qn('w:type'), 'auto')
+    tblPr.append(tblW)
+    tblBorders = OxmlElement('w:tblBorders')
     for side in ('top','left','bottom','right','insideH','insideV'):
-        b = OxmlElement(f'w:{side}')
-        b.set(qn('w:val'), 'none'); fBorders.append(b)
-    fPr.append(fBorders)
-
-    def _footer_lines(cell, lines, bold_first=False):
-        first = True
-        for line in lines:
-            p = cell.paragraphs[0] if first else cell.add_paragraph()
-            first = False
-            r = p.add_run(line)
-            r.font.size = Pt(7)
-            r.font.color.rgb = BRAND_COLOR
-            if bold_first and line == lines[0]:
-                r.bold = True
-
-    _footer_lines(f_tbl.cell(0, 0), [
-        '2020 K Street, NW, Suite 410',
-        'Washington DC 20006',
-        '+1 202 463-7300',
-    ])
-    _footer_lines(f_tbl.cell(0, 1), ['Contact:', '', 'Email:'])
-    _footer_lines(f_tbl.cell(0, 2), [
-        'Mallory Newall',
-        'VP, US, Public Affairs',
-        'mallory.newall@ipsos.com',
-    ], bold_first=True)
+        b = OxmlElement(f'w:{side}'); b.set(qn('w:val'), 'none'); tblBorders.append(b)
+    tblPr.append(tblBorders)
+    f_tbl.append(tblPr)
+    f_tbl.append(f_tr)
+    fp._element.addnext(f_tbl)
 
     # ── Title block: white text on teal (#008E94) background ─────
     title_para = doc.paragraphs[0]
