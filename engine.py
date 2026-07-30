@@ -948,18 +948,34 @@ def _write_word_table(doc, insert_after_para, question_wording,
     spacer = _insert_para_after(q_para)
 
     n_cols = len(col_names)
+    # Total text width = 6.5" at 1440 dxa/inch = 9360; match Iran topline (9429)
+    TOTAL_W = 9429
+    LABEL_W = 2520
+    data_w  = (TOTAL_W - LABEL_W) // max(n_cols, 1)
+    # Column widths: [label_col, data_col×n_cols]
+    col_widths = [str(LABEL_W)] + [str(data_w)] * n_cols
+
     tbl_el = OxmlElement('w:tbl')
     spacer._element.addnext(tbl_el)
 
+    # tblPr — TableGrid style for proper cell borders
     tblPr = OxmlElement('w:tblPr')
-    tblW  = OxmlElement('w:tblW')
-    tblW.set(qn('w:w'), '0'); tblW.set(qn('w:type'), 'auto')
-    tblPr.append(tblW)
+    tblStyle = OxmlElement('w:tblStyle'); tblStyle.set(qn('w:val'), 'TableGrid'); tblPr.append(tblStyle)
+    tblW = OxmlElement('w:tblW'); tblW.set(qn('w:w'), str(TOTAL_W)); tblW.set(qn('w:type'), 'dxa'); tblPr.append(tblW)
+    tblLayout = OxmlElement('w:tblLayout'); tblLayout.set(qn('w:type'), 'fixed'); tblPr.append(tblLayout)
     tbl_el.append(tblPr)
 
-    def make_cell(text, bold=False, center=True, size_pt=9):
+    # tblGrid
+    tblGrid = OxmlElement('w:tblGrid')
+    for w in col_widths:
+        gc = OxmlElement('w:gridCol'); gc.set(qn('w:w'), w); tblGrid.append(gc)
+    tbl_el.append(tblGrid)
+
+    def make_cell(text, col_w, bold=False, center=True):
         tc = OxmlElement('w:tc')
         tcPr = OxmlElement('w:tcPr')
+        tcW = OxmlElement('w:tcW'); tcW.set(qn('w:w'), col_w); tcW.set(qn('w:type'), 'dxa')
+        tcPr.append(tcW)
         tc.append(tcPr)
         p = OxmlElement('w:p')
         pPr = OxmlElement('w:pPr')
@@ -967,36 +983,38 @@ def _write_word_table(doc, insert_after_para, question_wording,
             jc = OxmlElement('w:jc'); jc.set(qn('w:val'), 'center'); pPr.append(jc)
         sp = OxmlElement('w:spacing'); sp.set(qn('w:after'), '0'); pPr.append(sp)
         p.append(pPr)
-        r = OxmlElement('w:r')
-        rPr = OxmlElement('w:rPr')
-        if bold:
-            b = OxmlElement('w:b'); rPr.append(b)
-        sz = OxmlElement('w:sz'); sz.set(qn('w:val'), str(size_pt * 2)); rPr.append(sz)
-        r.append(rPr)
-        t = OxmlElement('w:t')
-        t.text = str(text) if text else ''
-        if text and (str(text).startswith(' ') or str(text).endswith(' ')):
-            t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
-        r.append(t); p.append(r); tc.append(p)
+        if text:
+            r = OxmlElement('w:r')
+            rPr = OxmlElement('w:rPr')
+            if bold:
+                b = OxmlElement('w:b'); rPr.append(b)
+            r.append(rPr)
+            t = OxmlElement('w:t')
+            t.text = str(text)
+            if str(text).startswith(' ') or str(text).endswith(' '):
+                t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+            r.append(t)
+            p.append(r)
+        tc.append(p)
         return tc
 
-    # Header row: bold, no background fill
+    # Header row: empty first cell, bold col names
     hdr_tr = OxmlElement('w:tr')
-    hdr_tr.append(make_cell('', bold=True, center=True))
+    hdr_tr.append(make_cell('', col_widths[0], bold=False, center=True))
     for ci, name in enumerate(col_names):
         bv   = base_vals[ci] if ci < len(base_vals) else None
-        bstr = f'\n(N={int(bv):,})' if isinstance(bv, float) and bv else ''
-        hdr_tr.append(make_cell(name + bstr, bold=True, center=True))
+        bstr = f' (N={int(bv):,})' if isinstance(bv, (int, float)) and bv else ''
+        hdr_tr.append(make_cell(name + bstr, col_widths[ci + 1], bold=True, center=True))
     tbl_el.append(hdr_tr)
 
-    # Data rows: no shading
+    # Data rows
     for ri, answer in enumerate(answers):
         data_tr = OxmlElement('w:tr')
-        data_tr.append(make_cell(answer, bold=False, center=False))
+        data_tr.append(make_cell(answer, col_widths[0], bold=False, center=False))
         row_vals = values[ri] if ri < len(values) else []
         for ci in range(n_cols):
             v = row_vals[ci] if ci < len(row_vals) else None
-            data_tr.append(make_cell(_fmt_pct(v), center=True))
+            data_tr.append(make_cell(_fmt_pct(v), col_widths[ci + 1], center=True))
         tbl_el.append(data_tr)
 
     return tbl_el
@@ -1036,13 +1054,15 @@ def generate_word(selections, files, profile_name, col_indices, col_names,
     footer = section.footer
     fp = footer.paragraphs[0]
 
-    def _make_footer_cell(col_lines, bold_first=False):
+    # Column widths matching Iran topline reference exactly (in dxa)
+    _FOOTER_COL_WIDTHS = ('1983', '668', '2660')
+
+    def _make_footer_cell(col_lines, col_w, bold_first=False):
         tc = OxmlElement('w:tc')
         tcPr = OxmlElement('w:tcPr')
         tcW = OxmlElement('w:tcW')
-        tcW.set(qn('w:w'), '2160'); tcW.set(qn('w:type'), 'dxa')
+        tcW.set(qn('w:w'), col_w); tcW.set(qn('w:type'), 'dxa')
         tcPr.append(tcW)
-        # No cell borders
         tcBorders = OxmlElement('w:tcBorders')
         for side in ('top','left','bottom','right'):
             b = OxmlElement(f'w:{side}')
@@ -1068,19 +1088,25 @@ def generate_word(selections, files, profile_name, col_indices, col_names,
         return tc
 
     f_tr = OxmlElement('w:tr')
-    f_tr.append(_make_footer_cell(['2020 K Street, NW, Suite 410', 'Washington DC 20006', '+1 202 463-7300']))
-    f_tr.append(_make_footer_cell(['Contact:', '', 'Email:']))
-    f_tr.append(_make_footer_cell(['Mallory Newall', 'VP, US, Public Affairs', 'mallory.newall@ipsos.com'], bold_first=True))
+    f_tr.append(_make_footer_cell(['2020 K Street, NW, Suite 410', 'Washington DC 20006', '+1 202 463-7300'], _FOOTER_COL_WIDTHS[0]))
+    f_tr.append(_make_footer_cell(['Contact:', '', 'Email:'], _FOOTER_COL_WIDTHS[1]))
+    f_tr.append(_make_footer_cell(['Mallory Newall', 'VP, US, Public Affairs', 'mallory.newall@ipsos.com'], _FOOTER_COL_WIDTHS[2], bold_first=True))
 
     f_tbl = OxmlElement('w:tbl')
     tblPr = OxmlElement('w:tblPr')
-    tblW = OxmlElement('w:tblW'); tblW.set(qn('w:w'), '0'); tblW.set(qn('w:type'), 'auto')
+    tblStyle = OxmlElement('w:tblStyle'); tblStyle.set(qn('w:val'), 'a'); tblPr.append(tblStyle)
+    tblW = OxmlElement('w:tblW'); tblW.set(qn('w:w'), '5311'); tblW.set(qn('w:type'), 'dxa')
     tblPr.append(tblW)
     tblBorders = OxmlElement('w:tblBorders')
     for side in ('top','left','bottom','right','insideH','insideV'):
-        b = OxmlElement(f'w:{side}'); b.set(qn('w:val'), 'none'); tblBorders.append(b)
+        b = OxmlElement(f'w:{side}'); b.set(qn('w:val'), 'nil'); tblBorders.append(b)
     tblPr.append(tblBorders)
+    tblLayout = OxmlElement('w:tblLayout'); tblLayout.set(qn('w:type'), 'fixed'); tblPr.append(tblLayout)
     f_tbl.append(tblPr)
+    tblGrid = OxmlElement('w:tblGrid')
+    for w in _FOOTER_COL_WIDTHS:
+        gc = OxmlElement('w:gridCol'); gc.set(qn('w:w'), w); tblGrid.append(gc)
+    f_tbl.append(tblGrid)
     f_tbl.append(f_tr)
     fp._element.addnext(f_tbl)
 
