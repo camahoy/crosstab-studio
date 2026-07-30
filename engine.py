@@ -1085,7 +1085,7 @@ def generate_word(selections, files, profile_name, col_indices, col_names,
     fp._element.addnext(f_tbl)
 
     # ── Title block: white text on teal (#008E94) background ─────
-    title_para = doc.paragraphs[0]
+    title_para = doc.paragraphs[0] if doc.paragraphs else doc.add_paragraph()
     title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pPr = title_para._element.get_or_add_pPr()
     shd = OxmlElement('w:shd')
