@@ -437,16 +437,8 @@ def _get_kp_omni_statement(raw):
             return v
     return None
 
-def parse_sheet(file_bytes, sheet_idx, profile_name, col_indices):
-    """
-    Parse one sheet. Returns wording, base values, answers, values.
-    Handles all formats including KP Omni dynamic row detection.
-    """
-    profile = _profile(profile_name)
-    xl      = pd.ExcelFile(io.BytesIO(file_bytes))
-    df      = xl.parse(sheet_idx, header=None, na_values=[''])
-    raw     = df.values.tolist()
-
+def _parse_sheet_raw(raw, profile, profile_name, col_indices):
+    """Shared parse logic for parse_sheet / parse_sheet_from_xl."""
     # Question wording
     q_row   = profile["question_row"]
     wording = str(raw[q_row][0]).strip() if len(raw) > q_row and raw[q_row] and raw[q_row][0] else ''
@@ -548,6 +540,21 @@ def parse_sheet(file_bytes, sheet_idx, profile_name, col_indices):
         'sig_data':  sig_data,
         'net_start': len(main_answers),   # index where Net rows begin (for separator line)
     }
+
+
+def parse_sheet_from_xl(xl, sheet_idx, profile_name, col_indices):
+    """Parse one sheet from a pre-opened pd.ExcelFile — no file re-open cost."""
+    profile = _profile(profile_name)
+    df      = xl.parse(sheet_idx, header=None, na_values=[''])
+    return _parse_sheet_raw(df.values.tolist(), profile, profile_name, col_indices)
+
+
+def parse_sheet(file_bytes, sheet_idx, profile_name, col_indices):
+    """Parse one sheet. Opens the file internally (legacy path)."""
+    profile = _profile(profile_name)
+    xl      = pd.ExcelFile(io.BytesIO(file_bytes))
+    df      = xl.parse(sheet_idx, header=None, na_values=[''])
+    return _parse_sheet_raw(df.values.tolist(), profile, profile_name, col_indices)
 
 # ── Excel styles ──────────────────────────────────────────────
 

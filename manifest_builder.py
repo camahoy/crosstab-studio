@@ -57,10 +57,16 @@ class BannerCache:
 
         all_indices = sorted({e["sheet_idx"] for e in needed})
         self._parsed = {}  # sheet_idx -> parsed dict
+
+        # Open the Excel file ONCE and reuse it for every sheet parse
+        xl = pd.ExcelFile(io.BytesIO(file_bytes))
         for i, si in enumerate(all_indices):
-            p = _engine.parse_sheet(file_bytes, si, profile_name, col_indices)
-            if p:
-                self._parsed[si] = p
+            try:
+                p = _engine.parse_sheet_from_xl(xl, si, profile_name, col_indices)
+                if p:
+                    self._parsed[si] = p
+            except Exception:
+                pass
             if progress_cb:
                 progress_cb(i + 1, len(all_indices))
 
