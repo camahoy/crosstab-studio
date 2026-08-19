@@ -563,24 +563,34 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
             w4_map = _merged_col_map(w4_col_maps, audiences)
             w3_map = _merged_col_map(w3_col_maps, audiences) if w3_files else {}
 
-            # Find best current-wave cache for this prefix
-            w4_data = {"found": False, "rows": [], "base": {}, "wording": ""}
-            for fi, bc in enumerate(w4_caches):
-                cm = w4_col_maps[fi] if fi < len(w4_col_maps) else {}
-                data = extract_slide_data(mrow, bc, cm)
-                if data["found"]:
-                    w4_data = data
-                    break
-
-            # Find best previous-wave cache for this prefix
-            w3_data = {"found": False, "rows": [], "base": {}, "wording": ""}
-            if do_wave and w3_caches:
-                for fi, bc in enumerate(w3_caches):
-                    cm = w3_col_maps[fi] if fi < len(w3_col_maps) else {}
+            # Merge data from ALL current-wave caches so subgroup banners contribute
+            def _merge_cache_data(caches, col_maps):
+                merged_rows = {}   # label → {aud: val}
+                merged_base = {}   # aud → n
+                wording = ""
+                for fi, bc in enumerate(caches):
+                    cm = col_maps[fi] if fi < len(col_maps) else {}
                     data = extract_slide_data(mrow, bc, cm)
                     if data["found"]:
-                        w3_data = data
-                        break
+                        wording = data["wording"] or wording
+                        for label, val_dict in data["rows"]:
+                            if label not in merged_rows:
+                                merged_rows[label] = {}
+                            merged_rows[label].update(val_dict)
+                        merged_base.update(data["base"])
+                return {
+                    "found": bool(merged_rows),
+                    "rows": list(merged_rows.items()),
+                    "base": merged_base,
+                    "wording": wording,
+                }
+
+            w4_data = _merge_cache_data(w4_caches, w4_col_maps)
+            w3_data = (
+                _merge_cache_data(w3_caches, w3_col_maps)
+                if do_wave and w3_caches
+                else {"found": False, "rows": [], "base": {}, "wording": ""}
+            )
 
             # ── Slide header ──────────────────────────────────────────
             slide_text = f"Slide {mrow['slide']}: {mrow['title']}"
