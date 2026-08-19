@@ -12,11 +12,64 @@ import openpyxl
 from openpyxl.styles import Font as XLFont, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
-from engine import (
-    read_toc, toc_to_groups, fast_scan, get_columns,
-    parse_sheet, _find_and_parse_all,
-)
+import engine as _engine
 from profiles import get_profile, get_profile_names
+
+# ── Cached engine wrappers (cache per file_bytes + profile) ───────────────────
+
+@st.cache_data(show_spinner=False)
+def _cached_read_toc(file_bytes: bytes, profile_name: str):
+    return _engine.read_toc(file_bytes, profile_name)
+
+@st.cache_data(show_spinner=False)
+def _cached_fast_scan(file_bytes: bytes, profile_name: str):
+    return _engine.fast_scan(file_bytes, profile_name)
+
+@st.cache_data(show_spinner=False)
+def _cached_get_columns(file_bytes: bytes, profile_name: str):
+    return _engine.get_columns(file_bytes, profile_name)
+
+@st.cache_data(show_spinner=False)
+def _cached_parse_sheet(file_bytes: bytes, sheet_idx: int, profile_name: str, col_indices: tuple):
+    return _engine.parse_sheet(file_bytes, sheet_idx, profile_name, list(col_indices))
+
+
+def _find_parsed_sheets(file_bytes, profile_name, prefix, col_indices_tuple):
+    """Find and parse all sheets for a prefix, using the per-file cache."""
+    toc = _cached_read_toc(file_bytes, profile_name)
+    if toc:
+        entries = [e for e in toc if e["prefix"] == prefix]
+        results = []
+        for e in entries:
+            p = _cached_parse_sheet(file_bytes, e["sheet_idx"], profile_name, col_indices_tuple)
+            if p and p["answers"]:
+                results.append(p)
+        return results
+    # TOC-less fallback
+    groups = _cached_fast_scan(file_bytes, profile_name)
+    match = next((g for g in groups if g["prefix"] == prefix), None)
+    if not match:
+        return []
+    results = []
+    for si in match["sheets"]:
+        p = _cached_parse_sheet(file_bytes, si, profile_name, col_indices_tuple)
+        if p and p["answers"]:
+            results.append(p)
+    return results
+
+
+def _all_sheet_entries(file_bytes, profile_name, prefix):
+    """Return [(sheet_idx, wording, sheet_type)] for a prefix, using cache."""
+    toc = _cached_read_toc(file_bytes, profile_name)
+    if toc:
+        return [(e["sheet_idx"], e["wording"], e["sheet_type"])
+                for e in toc if e["prefix"] == prefix]
+    groups = _cached_fast_scan(file_bytes, profile_name)
+    match = next((g for g in groups if g["prefix"] == prefix), None)
+    if not match:
+        return []
+    return [(si, match["wording"], t)
+            for si, t in zip(match["sheets"], match.get("types", ["standard"] * len(match["sheets"])))]
 
 
 # ── Styles ────────────────────────────────────────────────────────────────────
@@ -126,7 +179,7 @@ def get_audience_col_map(file_bytes, profile_name, audience_list):
     Return {audience_name: col_idx} for each audience in audience_list.
     Missing audiences get None.
     """
-    cols = get_columns(file_bytes, profile_name)
+    cols = _cached_get_columns(file_bytes, profile_name)
     return {aud: _match_col_for_audience(cols, aud) for aud in audience_list}
 
 
@@ -134,10 +187,10 @@ def get_audience_col_map(file_bytes, profile_name, audience_list):
 
 def get_all_prefixes(file_bytes, profile_name):
     """Return set of all question prefixes found in the banner."""
-    toc = read_toc(file_bytes, profile_name)
+    toc = _cached_read_toc(file_bytes, profile_name)
     if toc:
         return {e["prefix"] for e in toc}
-    groups = fast_scan(file_bytes, profile_name)
+    groups = _cached_fast_scan(file_bytes, profile_name)
     return {g["prefix"] for g in groups}
 
 
@@ -325,7 +378,7 @@ def extract_slide_data(manifest_row, file_bytes, profile_name, col_map):
 
     if per_entity and brands:
         # Parse each brand's sheet individually
-        all_sheets = _find_sheets_for_prefix(file_bytes, profile_name, prefix)
+        all_sheets = _all_sheet_entries(file_bytes, profile_name, prefix)
         result_rows = []
         base_vals   = {}
         wording_seen = ""
@@ -343,7 +396,7 @@ def extract_slide_data(manifest_row, file_bytes, profile_name, col_map):
                 result_rows.append((brand, {aud: None for aud in aud_order}))
                 continue
 
-            p = parse_sheet(file_bytes, matched_sheet, profile_name, col_indices)
+            p = _cached_parse_sheet(file_bytes, matched_sheet, profile_name, tuple(col_indices))
             if not p:
                 result_rows.append((brand, {aud: None for aud in aud_order}))
                 continue
@@ -375,7 +428,7 @@ def extract_slide_data(manifest_row, file_bytes, profile_name, col_map):
 
     else:
         # T2B Summary or Full scale — one or a few sheets contain all the data
-        parsed_list = _find_and_parse_all(file_bytes, prefix, profile_name, col_indices)
+        parsed_list = _find_parsed_sheets(file_bytes, profile_name, prefix, tuple(col_indices))
         if not parsed_list:
             return {"found": False, "rows": [], "base": {}, "wording": ""}
 
@@ -403,7 +456,7 @@ def extract_slide_data(manifest_row, file_bytes, profile_name, col_map):
 # ── Excel builder ─────────────────────────────────────────────────────────────
 
 def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
-                     missing_prefixes, new_prefixes):
+                     missing_prefixes, new_prefixes, progress_cb=None):
     """
     Build the output Excel.
     w4_files / w3_files: list of {bytes, label, name}
@@ -453,6 +506,8 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
         sections[sec].append(row)
 
     # Create tabs: one per section + a "Flags" tab
+    total_slides = len(manifest_rows)
+    slide_done   = 0
     for sec in section_order:
         tab_name = re.sub(r'[\\/*?\[\]:]', '', sec)[:31]
         ws = wb.create_sheet(title=tab_name)
@@ -652,6 +707,10 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
 
             current_row += 1  # spacer between slides
 
+            if progress_cb:
+                progress_cb(slide_done, total_slides)
+            slide_done += 1
+
     # ── Flags tab ─────────────────────────────────────────────────────────────
     ws_f = wb.create_sheet(title="⚑ Flags")
     ws_f.column_dimensions["A"].width = 20
@@ -795,42 +854,68 @@ def show_manifest_builder():
         w3_files = [{"bytes": f.getvalue(), "label": f.name, "name": f.name}
                     for f in w3_uploads] if w3_uploads else []
 
-        with st.spinner("Scanning banners and extracting metrics…"):
-            try:
-                all_w4_prefixes = set()
-                for finfo in w4_files:
-                    all_w4_prefixes |= get_all_prefixes(finfo["bytes"], mb_profile)
+        prog_area = st.empty()
+        status_area = st.empty()
+        try:
+            status_area.markdown(
+                "<div style='font-size:0.82rem;color:#374151'>Step 1 of 3 — Reading banner TOC…</div>",
+                unsafe_allow_html=True,
+            )
+            prog_area.progress(0.05)
 
-                spec_prefixes    = {r["prefix"] for r in manifest_rows if r["prefix"]}
-                missing_prefixes = spec_prefixes - all_w4_prefixes
-                new_prefixes     = all_w4_prefixes - spec_prefixes
+            all_w4_prefixes = set()
+            for finfo in w4_files:
+                all_w4_prefixes |= get_all_prefixes(finfo["bytes"], mb_profile)
 
-                if missing_prefixes:
-                    st.warning(
-                        f"⚠ {len(missing_prefixes)} code(s) in your spec not found in banner: "
-                        + ", ".join(sorted(missing_prefixes))
-                    )
-                if new_prefixes:
-                    st.info(
-                        f"★ {len(new_prefixes)} code(s) in the banner not in your spec (new this wave): "
-                        + ", ".join(sorted(new_prefixes))
-                    )
+            prog_area.progress(0.2)
+            status_area.markdown(
+                "<div style='font-size:0.82rem;color:#374151'>Step 2 of 3 — Matching columns…</div>",
+                unsafe_allow_html=True,
+            )
 
-                result_bytes = build_cuts_excel(
-                    manifest_rows, w4_files, w3_files, mb_profile,
-                    missing_prefixes, new_prefixes,
+            spec_prefixes    = {r["prefix"] for r in manifest_rows if r["prefix"]}
+            missing_prefixes = spec_prefixes - all_w4_prefixes
+            new_prefixes     = all_w4_prefixes - spec_prefixes
+
+            if missing_prefixes:
+                st.warning(
+                    f"⚠ {len(missing_prefixes)} code(s) in your spec not found in banner: "
+                    + ", ".join(sorted(missing_prefixes))
+                )
+            if new_prefixes:
+                st.info(
+                    f"★ {len(new_prefixes)} code(s) in the banner not in your spec (new this wave): "
+                    + ", ".join(sorted(new_prefixes))
                 )
 
-                st.success(f"Done — {len(manifest_rows)} cuts across {n_sections} sections")
-                st.download_button(
-                    label="⬇  Download custom cuts Excel",
-                    data=result_bytes,
-                    file_name="custom_cuts.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="mb_download",
-                )
+            prog_area.progress(0.3)
+            status_area.markdown(
+                f"<div style='font-size:0.82rem;color:#374151'>Step 3 of 3 — Extracting {len(manifest_rows)} cuts…</div>",
+                unsafe_allow_html=True,
+            )
 
-            except Exception as e:
-                import traceback
-                st.error(f"Build failed: {e}")
-                st.code(traceback.format_exc())
+            result_bytes = build_cuts_excel(
+                manifest_rows, w4_files, w3_files, mb_profile,
+                missing_prefixes, new_prefixes,
+                progress_cb=lambda done, total: prog_area.progress(0.3 + 0.7 * done / max(total, 1)),
+            )
+
+            prog_area.progress(1.0)
+            status_area.empty()
+            prog_area.empty()
+
+            st.success(f"Done — {len(manifest_rows)} cuts across {n_sections} sections")
+            st.download_button(
+                label="⬇  Download custom cuts Excel",
+                data=result_bytes,
+                file_name="custom_cuts.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="mb_download",
+            )
+
+        except Exception as e:
+            import traceback
+            prog_area.empty()
+            status_area.empty()
+            st.error(f"Build failed: {e}")
+            st.code(traceback.format_exc())
