@@ -15,62 +15,71 @@ from openpyxl.utils import get_column_letter
 import engine as _engine
 from profiles import get_profile, get_profile_names
 
-# ── Cached engine wrappers (cache per file_bytes + profile) ───────────────────
 
-@st.cache_data(show_spinner=False)
-def _cached_read_toc(file_bytes: bytes, profile_name: str):
-    return _engine.read_toc(file_bytes, profile_name)
+# ── Banner pre-parser — opens each file ONCE ──────────────────────────────────
 
-@st.cache_data(show_spinner=False)
-def _cached_fast_scan(file_bytes: bytes, profile_name: str):
-    return _engine.fast_scan(file_bytes, profile_name)
+class BannerCache:
+    """
+    Pre-parses all sheets from a banner file in a single pass.
+    Holds parsed data in memory; no repeated file opens.
+    """
+    def __init__(self, file_bytes, profile_name, col_indices, progress_cb=None):
+        self.profile_name = profile_name
+        self.col_indices  = col_indices
 
-@st.cache_data(show_spinner=False)
-def _cached_get_columns(file_bytes: bytes, profile_name: str):
-    return _engine.get_columns(file_bytes, profile_name)
+        # Read TOC / question index
+        toc = _engine.read_toc(file_bytes, profile_name)
+        if toc:
+            self._toc = toc
+            prefix_to_entries = {}
+            for e in toc:
+                prefix_to_entries.setdefault(e["prefix"], []).append(e)
+        else:
+            groups = _engine.fast_scan(file_bytes, profile_name)
+            self._toc = []
+            prefix_to_entries = {}
+            for g in groups:
+                for i, si in enumerate(g["sheets"]):
+                    t = g.get("types", ["standard"] * len(g["sheets"]))[i]
+                    entry = {"sheet_idx": si, "prefix": g["prefix"],
+                             "wording": g["wording"], "sheet_type": t}
+                    self._toc.append(entry)
+                    prefix_to_entries.setdefault(g["prefix"], []).append(entry)
 
-@st.cache_data(show_spinner=False)
-def _cached_parse_sheet(file_bytes: bytes, sheet_idx: int, profile_name: str, col_indices: tuple):
-    return _engine.parse_sheet(file_bytes, sheet_idx, profile_name, list(col_indices))
+        self._prefix_map = prefix_to_entries  # prefix -> [entry]
 
+        # Parse every referenced sheet once
+        all_indices = sorted({e["sheet_idx"] for e in self._toc})
+        self._parsed = {}  # sheet_idx -> parsed dict
+        for i, si in enumerate(all_indices):
+            p = _engine.parse_sheet(file_bytes, si, profile_name, col_indices)
+            if p:
+                self._parsed[si] = p
+            if progress_cb:
+                progress_cb(i + 1, len(all_indices))
 
-def _find_parsed_sheets(file_bytes, profile_name, prefix, col_indices_tuple):
-    """Find and parse all sheets for a prefix, using the per-file cache."""
-    toc = _cached_read_toc(file_bytes, profile_name)
-    if toc:
-        entries = [e for e in toc if e["prefix"] == prefix]
+    def prefixes(self):
+        return set(self._prefix_map.keys())
+
+    def get_columns(self):
+        return self.col_indices
+
+    def entries_for(self, prefix):
+        """[(sheet_idx, wording, sheet_type)] for a prefix."""
+        return [(e["sheet_idx"], e["wording"], e["sheet_type"])
+                for e in self._prefix_map.get(prefix, [])]
+
+    def parsed_for(self, prefix):
+        """List of parsed dicts for a prefix (non-empty answers only)."""
         results = []
-        for e in entries:
-            p = _cached_parse_sheet(file_bytes, e["sheet_idx"], profile_name, col_indices_tuple)
-            if p and p["answers"]:
+        for e in self._prefix_map.get(prefix, []):
+            p = self._parsed.get(e["sheet_idx"])
+            if p and p.get("answers"):
                 results.append(p)
         return results
-    # TOC-less fallback
-    groups = _cached_fast_scan(file_bytes, profile_name)
-    match = next((g for g in groups if g["prefix"] == prefix), None)
-    if not match:
-        return []
-    results = []
-    for si in match["sheets"]:
-        p = _cached_parse_sheet(file_bytes, si, profile_name, col_indices_tuple)
-        if p and p["answers"]:
-            results.append(p)
-    return results
 
-
-def _all_sheet_entries(file_bytes, profile_name, prefix):
-    """Return [(sheet_idx, wording, sheet_type)] for a prefix, using cache."""
-    toc = _cached_read_toc(file_bytes, profile_name)
-    if toc:
-        return [(e["sheet_idx"], e["wording"], e["sheet_type"])
-                for e in toc if e["prefix"] == prefix]
-    groups = _cached_fast_scan(file_bytes, profile_name)
-    match = next((g for g in groups if g["prefix"] == prefix), None)
-    if not match:
-        return []
-    return [(si, match["wording"], t)
-            for si, t in zip(match["sheets"], match.get("types", ["standard"] * len(match["sheets"])))]
-
+    def parsed_sheet(self, sheet_idx):
+        return self._parsed.get(sheet_idx)
 
 # ── Styles ────────────────────────────────────────────────────────────────────
 
@@ -179,7 +188,7 @@ def get_audience_col_map(file_bytes, profile_name, audience_list):
     Return {audience_name: col_idx} for each audience in audience_list.
     Missing audiences get None.
     """
-    cols = _cached_get_columns(file_bytes, profile_name)
+    cols = _engine.get_columns(file_bytes, profile_name)
     return {aud: _match_col_for_audience(cols, aud) for aud in audience_list}
 
 
@@ -187,10 +196,10 @@ def get_audience_col_map(file_bytes, profile_name, audience_list):
 
 def get_all_prefixes(file_bytes, profile_name):
     """Return set of all question prefixes found in the banner."""
-    toc = _cached_read_toc(file_bytes, profile_name)
+    toc = _engine.read_toc(file_bytes, profile_name)
     if toc:
         return {e["prefix"] for e in toc}
-    groups = _cached_fast_scan(file_bytes, profile_name)
+    groups = _engine.fast_scan(file_bytes, profile_name)
     return {g["prefix"] for g in groups}
 
 
@@ -313,22 +322,6 @@ def _extract_metric(parsed, metric_type, brands_filter=None):
     return rows
 
 
-# ── Per-brand sheet lookup ────────────────────────────────────────────────────
-
-def _find_sheets_for_prefix(file_bytes, profile_name, prefix):
-    """Return list of (sheet_idx, wording, sheet_type) for a prefix."""
-    toc = read_toc(file_bytes, profile_name)
-    if toc:
-        return [(e["sheet_idx"], e["wording"], e["sheet_type"])
-                for e in toc if e["prefix"] == prefix]
-    groups = fast_scan(file_bytes, profile_name)
-    match = next((g for g in groups if g["prefix"] == prefix), None)
-    if not match:
-        return []
-    return [(si, match["wording"], t)
-            for si, t in zip(match["sheets"], match.get("types", ["standard"]*len(match["sheets"])))]
-
-
 def _find_brand_in_wording(wording, brands):
     """Return which brand from the list appears in this sheet's wording, or None."""
     wl = wording.lower()
@@ -340,18 +333,13 @@ def _find_brand_in_wording(wording, brands):
 
 # ── Slide data extraction ─────────────────────────────────────────────────────
 
-def extract_slide_data(manifest_row, file_bytes, profile_name, col_map):
+def extract_slide_data(manifest_row, cache, col_map):
     """
-    Extract data for one manifest row from a banner file.
+    Extract data for one manifest row using a pre-built BannerCache.
     col_map = {audience: col_idx}
 
     Returns:
-        {
-            "found": bool,
-            "rows": [(row_label, {audience: value}), ...]
-            "base":  {audience: base_n}
-            "wording": str
-        }
+        {"found": bool, "rows": [(label, {aud: val}), ...], "base": {aud: n}, "wording": str}
     """
     prefix     = manifest_row["prefix"]
     metric     = manifest_row["metric"]
@@ -359,44 +347,46 @@ def extract_slide_data(manifest_row, file_bytes, profile_name, col_map):
     audiences  = manifest_row["audiences"]
     sheet_type = manifest_row["sheet_type"]
 
-    # Build col_indices list in audience order
-    col_indices = []
+    # Map audiences to column positions within the cache's col_indices
+    cache_cols  = cache.get_columns()
     aud_order   = []
+    col_pos     = []   # position index into cache_cols for each audience
     for aud in audiences:
         ci = col_map.get(aud)
-        if ci is not None:
-            col_indices.append(ci)
+        if ci is not None and ci in cache_cols:
             aud_order.append(aud)
+            col_pos.append(cache_cols.index(ci))
 
-    if not col_indices:
+    if not aud_order:
         return {"found": False, "rows": [], "base": {}, "wording": ""}
 
-    # Detect if this is a per-brand/per-entity sheet type
-    per_entity = any(k in sheet_type.lower() for k in ["per brand", "per ceo", "per tool",
-                                                         "per assistant", "per statement",
-                                                         "per medium", "per outlet"])
+    per_entity = any(k in sheet_type.lower() for k in [
+        "per brand", "per ceo", "per tool", "per assistant",
+        "per statement", "per medium", "per outlet"])
+
+    def _vals_for_row(full_vals):
+        """Slice a full value row to just the requested audience positions."""
+        return [full_vals[p] if p < len(full_vals) else None for p in col_pos]
 
     if per_entity and brands:
-        # Parse each brand's sheet individually
-        all_sheets = _all_sheet_entries(file_bytes, profile_name, prefix)
-        result_rows = []
-        base_vals   = {}
+        all_sheets = cache.entries_for(prefix)
+        result_rows  = []
+        base_vals    = {}
         wording_seen = ""
 
         for brand in brands:
-            # Find the sheet for this brand
-            matched_sheet = None
+            matched_si = None
             for si, word, stype in all_sheets:
                 if _find_brand_in_wording(word, [brand]):
-                    matched_sheet = si
-                    wording_seen  = word
+                    matched_si   = si
+                    wording_seen = word
                     break
 
-            if matched_sheet is None:
+            if matched_si is None:
                 result_rows.append((brand, {aud: None for aud in aud_order}))
                 continue
 
-            p = _cached_parse_sheet(file_bytes, matched_sheet, profile_name, tuple(col_indices))
+            p = cache.parsed_sheet(matched_si)
             if not p:
                 result_rows.append((brand, {aud: None for aud in aud_order}))
                 continue
@@ -404,21 +394,21 @@ def extract_slide_data(manifest_row, file_bytes, profile_name, col_map):
             if not wording_seen:
                 wording_seen = p.get("wording", "")
 
-            # Update base
             for ai, aud in enumerate(aud_order):
                 if aud not in base_vals:
-                    bv = p["base_vals"][ai] if ai < len(p["base_vals"]) else None
+                    bv = p["base_vals"][col_pos[ai]] if col_pos[ai] < len(p["base_vals"]) else None
                     if bv is not None:
                         base_vals[aud] = int(bv) if isinstance(bv, float) else bv
 
-            rows = _extract_metric(p, metric, brands_filter=None)
+            # Build a view of parsed with only the requested columns
+            p_view = dict(p)
+            p_view["values"]    = [_vals_for_row(v) for v in p.get("values", [])]
+            p_view["base_vals"] = _vals_for_row(p.get("base_vals", []))
+
+            rows = _extract_metric(p_view, metric, brands_filter=None)
             if rows:
-                # For per-brand sheets, the metric row label doesn't matter much
-                # We want just one value per brand per audience
                 _, vals = rows[0]
-                row_dict = {}
-                for ai, aud in enumerate(aud_order):
-                    row_dict[aud] = _fmt(vals[ai]) if ai < len(vals) else None
+                row_dict = {aud: _fmt(vals[ai]) for ai, aud in enumerate(aud_order) if ai < len(vals)}
                 result_rows.append((brand, row_dict))
             else:
                 result_rows.append((brand, {aud: None for aud in aud_order}))
@@ -427,27 +417,27 @@ def extract_slide_data(manifest_row, file_bytes, profile_name, col_map):
                 "base": base_vals, "wording": wording_seen}
 
     else:
-        # T2B Summary or Full scale — one or a few sheets contain all the data
-        parsed_list = _find_parsed_sheets(file_bytes, profile_name, prefix, tuple(col_indices))
+        parsed_list = cache.parsed_for(prefix)
         if not parsed_list:
             return {"found": False, "rows": [], "base": {}, "wording": ""}
 
-        # Use first parsed sheet
         p = parsed_list[0]
         wording = p.get("wording", "")
 
         base_vals = {}
         for ai, aud in enumerate(aud_order):
-            bv = p["base_vals"][ai] if ai < len(p["base_vals"]) else None
+            bv = p["base_vals"][col_pos[ai]] if col_pos[ai] < len(p.get("base_vals", [])) else None
             if bv is not None:
                 base_vals[aud] = int(bv) if isinstance(bv, float) else bv
 
-        rows = _extract_metric(p, metric, brands_filter=brands or None)
+        p_view = dict(p)
+        p_view["values"]    = [_vals_for_row(v) for v in p.get("values", [])]
+        p_view["base_vals"] = _vals_for_row(p.get("base_vals", []))
+
+        rows = _extract_metric(p_view, metric, brands_filter=brands or None)
         result_rows = []
         for label, vals in rows:
-            row_dict = {}
-            for ai, aud in enumerate(aud_order):
-                row_dict[aud] = _fmt(vals[ai]) if ai < len(vals) else None
+            row_dict = {aud: _fmt(vals[ai]) for ai, aud in enumerate(aud_order) if ai < len(vals)}
             result_rows.append((label, row_dict))
 
         return {"found": True, "rows": result_rows, "base": base_vals, "wording": wording}
@@ -466,7 +456,7 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
 
-    # Collect all unique audiences to build column maps
+    # ── Step 1: collect all unique audiences across all rows ──────────────────
     all_audiences = []
     seen_aud = set()
     for row in manifest_rows:
@@ -475,17 +465,13 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
                 all_audiences.append(a)
                 seen_aud.add(a)
 
-    # Build col maps for each file
-    def _col_maps(files):
-        maps = []
-        for finfo in files:
-            maps.append(get_audience_col_map(finfo["bytes"], profile_name, all_audiences))
-        return maps
+    # ── Step 2: build col maps (audience → column index) per file ─────────────
+    def _aud_col_map(finfo):
+        return get_audience_col_map(finfo["bytes"], profile_name, all_audiences)
 
-    w4_col_maps = _col_maps(w4_files)
-    w3_col_maps = _col_maps(w3_files) if w3_files else []
+    w4_col_maps = [_aud_col_map(f) for f in w4_files]
+    w3_col_maps = [_aud_col_map(f) for f in w3_files] if w3_files else []
 
-    # Merge col maps across files: prefer first file that has a mapping
     def _merged_col_map(col_maps, aud_list):
         result = {}
         for aud in aud_list:
@@ -495,7 +481,36 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
                     break
         return result
 
-    # Group manifest rows by section
+    # ── Step 3: pre-parse each banner file ONCE into a BannerCache ───────────
+    # Build union of all col_indices needed across all files
+    all_w4_cols = sorted({ci for cm in w4_col_maps for ci in cm.values() if ci is not None})
+    all_w3_cols = sorted({ci for cm in w3_col_maps for ci in cm.values() if ci is not None})
+
+    # Build one BannerCache per file — each opens the Excel once and parses all sheets
+    n_w4 = len(w4_files)
+    n_w3 = len(w3_files)
+    total_files = n_w4 + n_w3
+
+    def _sheet_progress(file_i, done, total):
+        if progress_cb:
+            # Scale sheet progress to 0→1 within one file's share
+            file_frac = file_i / max(total_files, 1)
+            next_frac = (file_i + 1) / max(total_files, 1)
+            progress_cb(file_frac + (done / max(total, 1)) * (next_frac - file_frac), 1.0)
+
+    w4_caches = []
+    for fi, finfo in enumerate(w4_files):
+        bc = BannerCache(finfo["bytes"], profile_name, all_w4_cols,
+                         progress_cb=lambda d, t, _fi=fi: _sheet_progress(_fi, d, t))
+        w4_caches.append(bc)
+
+    w3_caches = []
+    for fi, finfo in enumerate(w3_files):
+        bc = BannerCache(finfo["bytes"], profile_name, all_w3_cols,
+                         progress_cb=lambda d, t, _fi=fi: _sheet_progress(n_w4 + _fi, d, t))
+        w3_caches.append(bc)
+
+    # ── Step 4: group manifest rows by section and write Excel ────────────────
     sections = {}
     section_order = []
     for row in manifest_rows:
@@ -505,7 +520,6 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
             section_order.append(sec)
         sections[sec].append(row)
 
-    # Create tabs: one per section + a "Flags" tab
     total_slides = len(manifest_rows)
     slide_done   = 0
     for sec in section_order:
@@ -533,21 +547,21 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
             w4_map = _merged_col_map(w4_col_maps, audiences)
             w3_map = _merged_col_map(w3_col_maps, audiences) if w3_files else {}
 
-            # Find best W4 file for this prefix
+            # Find best current-wave cache for this prefix
             w4_data = {"found": False, "rows": [], "base": {}, "wording": ""}
-            for fi, finfo in enumerate(w4_files):
+            for fi, bc in enumerate(w4_caches):
                 cm = w4_col_maps[fi] if fi < len(w4_col_maps) else {}
-                data = extract_slide_data(mrow, finfo["bytes"], profile_name, cm)
+                data = extract_slide_data(mrow, bc, cm)
                 if data["found"]:
                     w4_data = data
                     break
 
-            # Find best W3 file for this prefix
+            # Find best previous-wave cache for this prefix
             w3_data = {"found": False, "rows": [], "base": {}, "wording": ""}
-            if do_wave and w3_files:
-                for fi, finfo in enumerate(w3_files):
+            if do_wave and w3_caches:
+                for fi, bc in enumerate(w3_caches):
                     cm = w3_col_maps[fi] if fi < len(w3_col_maps) else {}
-                    data = extract_slide_data(mrow, finfo["bytes"], profile_name, cm)
+                    data = extract_slide_data(mrow, bc, cm)
                     if data["found"]:
                         w3_data = data
                         break
@@ -890,14 +904,17 @@ def show_manifest_builder():
 
             prog_area.progress(0.3)
             status_area.markdown(
-                f"<div style='font-size:0.82rem;color:#374151'>Step 3 of 3 — Extracting {len(manifest_rows)} cuts…</div>",
+                f"<div style='font-size:0.82rem;color:#374151'>Step 3 of 3 — Parsing {len(w4_files) + len(w3_files)} banner file(s)…</div>",
                 unsafe_allow_html=True,
             )
+
+            def _build_progress(frac, _total):
+                prog_area.progress(min(0.3 + 0.65 * frac, 0.95))
 
             result_bytes = build_cuts_excel(
                 manifest_rows, w4_files, w3_files, mb_profile,
                 missing_prefixes, new_prefixes,
-                progress_cb=lambda done, total: prog_area.progress(0.3 + 0.7 * done / max(total, 1)),
+                progress_cb=_build_progress,
             )
 
             prog_area.progress(1.0)
