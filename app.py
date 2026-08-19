@@ -5,8 +5,8 @@ Upload-first flow: file detection drives profile selection.
 
 import streamlit as st
 import pandas as pd
-from engine import (fast_scan, get_columns, generate_excel, generate_word,
-                    detect_and_describe, read_toc, toc_to_groups,
+from engine import (fast_scan, get_columns, generate_excel, generate_excel_fast,
+                    generate_word, detect_and_describe, read_toc, toc_to_groups,
                     deep_scan_file, save_user_profile)
 from profiles import get_profile_names, get_profile
 from manifest_builder import show_manifest_builder
@@ -507,37 +507,70 @@ if confirmed and st.session_state.files and not st.session_state.scan_done:
         unsafe_allow_html=True
     )
     if st.button("◈  Scan file"):
-        with st.spinner("Scanning..."):
-            try:
-                files = st.session_state.files
+        try:
+            files      = st.session_state.files
+            ref        = files[0]['bytes']
+            status_el  = st.empty()
+            prog_el    = st.empty()
 
-                # Build question list from first file
-                ref = files[0]['bytes']
-                toc = read_toc(ref, confirmed)
-                groups = toc_to_groups(toc) if toc else fast_scan(ref, confirmed)
-                cols   = get_columns(ref, confirmed)
+            status_el.markdown(
+                "<div style='font-size:0.82rem;color:#374151'>Reading TOC…</div>",
+                unsafe_allow_html=True)
+            prog_el.progress(0.05)
 
-                # For multi-file: merge questions from all other files
-                # so questions that only exist in wave 2+ are still shown
-                if len(files) > 1:
-                    seen = {g['prefix'] for g in groups}
-                    for finfo in files[1:]:
-                        extra_toc = read_toc(finfo['bytes'], confirmed)
-                        extra = (toc_to_groups(extra_toc) if extra_toc
-                                 else fast_scan(finfo['bytes'], confirmed))
-                        for g in extra:
-                            if g['prefix'] not in seen:
-                                groups.append(g)
-                                seen.add(g['prefix'])
+            toc = read_toc(ref, confirmed)
+            if toc:
+                groups = toc_to_groups(toc)
+                prog_el.progress(0.7)
+            else:
+                status_el.markdown(
+                    "<div style='font-size:0.82rem;color:#374151'>"
+                    "Scanning sheets…</div>",
+                    unsafe_allow_html=True)
 
-                st.session_state.question_groups = groups
-                st.session_state.columns         = cols
-                st.session_state.scan_done       = True
-                st.session_state.selected_cols   = [j for j, g, s in cols]
-                st.rerun()
-            except Exception as e:
-                st.error(f"Scan failed: {e}")
-                import traceback; st.code(traceback.format_exc())
+                def _scan_progress(done, total):
+                    pct = 0.05 + 0.65 * (done / max(total, 1))
+                    prog_el.progress(min(pct, 0.7))
+                    status_el.markdown(
+                        f"<div style='font-size:0.82rem;color:#374151'>"
+                        f"Scanning sheet {done} of {total}…</div>",
+                        unsafe_allow_html=True)
+
+                groups = fast_scan(ref, confirmed, progress_cb=_scan_progress)
+
+            status_el.markdown(
+                "<div style='font-size:0.82rem;color:#374151'>Reading columns…</div>",
+                unsafe_allow_html=True)
+            prog_el.progress(0.8)
+            cols = get_columns(ref, confirmed)
+
+            if len(files) > 1:
+                status_el.markdown(
+                    "<div style='font-size:0.82rem;color:#374151'>"
+                    "Merging questions from additional files…</div>",
+                    unsafe_allow_html=True)
+                seen = {g['prefix'] for g in groups}
+                for finfo in files[1:]:
+                    extra_toc = read_toc(finfo['bytes'], confirmed)
+                    extra = (toc_to_groups(extra_toc) if extra_toc
+                             else fast_scan(finfo['bytes'], confirmed))
+                    for g in extra:
+                        if g['prefix'] not in seen:
+                            groups.append(g)
+                            seen.add(g['prefix'])
+
+            prog_el.progress(1.0)
+            status_el.empty()
+            prog_el.empty()
+
+            st.session_state.question_groups = groups
+            st.session_state.columns         = cols
+            st.session_state.scan_done       = True
+            st.session_state.selected_cols   = [j for j, g, s in cols]
+            st.rerun()
+        except Exception as e:
+            st.error(f"Scan failed: {e}")
+            import traceback; st.code(traceback.format_exc())
 
 # ═══════════════════════════════════════════════════
 # STEP 4 — Select questions + columns
@@ -721,25 +754,40 @@ if st.session_state.scan_done:
             col_indices     = st.session_state.selected_cols
             col_names       = [g for j,g,s in cols if j in col_indices]
 
-            with st.spinner("Building tables..."):
-                try:
-                    if export_fmt == "Excel":
-                        result_bytes = generate_excel(
-                            selected_groups,
-                            st.session_state.files,
-                            confirmed,
-                            col_indices,
-                            col_names,
-                            include_types=st.session_state.include_types or None,
-                        )
-                        st.success(f"Done — {n_sel} questions exported")
-                        st.download_button(
-                            label="⬇  Download Excel",
-                            data=result_bytes,
-                            file_name=f"{export_stem}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        )
-                    else:
+            try:
+                if export_fmt == "Excel":
+                    exp_prog  = st.empty()
+                    exp_stat  = st.empty()
+                    exp_prog.progress(0.02)
+
+                    def _export_progress(done, total):
+                        exp_prog.progress(min(0.02 + 0.95 * done / max(total, 1), 0.97))
+                        exp_stat.markdown(
+                            f"<div style='font-size:0.82rem;color:#374151'>"
+                            f"Building table {done} of {total}…</div>",
+                            unsafe_allow_html=True)
+
+                    result_bytes = generate_excel_fast(
+                        selected_groups,
+                        st.session_state.files,
+                        confirmed,
+                        col_indices,
+                        col_names,
+                        include_types=st.session_state.include_types or None,
+                        progress_cb=_export_progress,
+                    )
+                    exp_prog.progress(1.0)
+                    exp_stat.empty()
+                    exp_prog.empty()
+                    st.success(f"Done — {n_sel} questions exported")
+                    st.download_button(
+                        label="⬇  Download Excel",
+                        data=result_bytes,
+                        file_name=f"{export_stem}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                else:
+                    with st.spinner("Building Word document..."):
                         result_bytes, err = generate_word(
                             selected_groups,
                             st.session_state.files,
@@ -755,16 +803,16 @@ if st.session_state.scan_done:
                             moe=moe,
                             template=word_template,
                         )
-                        if err:
-                            st.error(f"Word export failed: {err}")
-                        else:
-                            st.success(f"Done — {n_sel} questions exported")
-                            st.download_button(
-                                label="⬇  Download Word",
-                                data=result_bytes,
-                                file_name=f"{export_stem}.docx",
-                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            )
-                except Exception as e:
-                    st.error(f"Export failed: {e}")
-                    import traceback; st.code(traceback.format_exc())
+                    if err:
+                        st.error(f"Word export failed: {err}")
+                    else:
+                        st.success(f"Done — {n_sel} questions exported")
+                        st.download_button(
+                            label="⬇  Download Word",
+                            data=result_bytes,
+                            file_name=f"{export_stem}.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        )
+            except Exception as e:
+                st.error(f"Export failed: {e}")
+                import traceback; st.code(traceback.format_exc())

@@ -178,16 +178,18 @@ def validate_format(file_bytes):
 
 # ── Fast scanner ──────────────────────────────────────────────
 
-def fast_scan(file_bytes, profile_name):
+def fast_scan(file_bytes, profile_name, progress_cb=None):
     """
     Rapidly read question names from each sheet.
     Returns ordered list of question groups.
+    progress_cb(done, total) called after each sheet.
     """
     profile = _profile(profile_name)
     q_row   = profile["question_row"]
     xl      = pd.ExcelFile(io.BytesIO(file_bytes))
     groups  = {}
     order   = []
+    total   = len(xl.sheet_names)
 
     for i, sname in enumerate(xl.sheet_names):
         # Skip sheet 0 if it looks like a TOC/index
@@ -255,7 +257,10 @@ def fast_scan(file_bytes, profile_name):
             groups[prefix]['types'].add(sheet_type)
 
         except Exception:
-            continue
+            pass
+        finally:
+            if progress_cb:
+                progress_cb(i + 1, total)
 
     # Convert types set to sorted list
     for g in groups.values():
@@ -925,6 +930,99 @@ def generate_excel(selections, files, profile_name, col_indices, col_names,
                     ws.merge_cells(start_row=row, start_column=1,
                                    end_row=row, end_column=len(col_names) + 1)
                     row += 3
+
+    if toc_entries:
+        _build_toc(wb, toc_entries)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def generate_excel_fast(selections, files, profile_name, col_indices, col_names,
+                        include_types=None, progress_cb=None):
+    """
+    Like generate_excel but opens each file ONCE and reuses the handle.
+    progress_cb(done, total) called after each question is written.
+    """
+    wb          = openpyxl.Workbook()
+    wb.remove(wb.active)
+    toc_entries = []
+    total_q     = len(selections)
+
+    # Pre-open every file and read its TOC once
+    file_handles = []
+    for finfo in files:
+        xl  = pd.ExcelFile(io.BytesIO(finfo['bytes']))
+        toc = read_toc(finfo['bytes'], profile_name)
+        file_handles.append({'xl': xl, 'toc': toc, 'label': finfo['label']})
+
+    def _parse_all_from_handle(handle, prefix, col_indices, include_types):
+        xl  = handle['xl']
+        toc = handle['toc']
+        if toc:
+            entries = [e for e in toc if e['prefix'] == prefix]
+            if include_types:
+                entries = [e for e in entries if e['sheet_type'] in include_types]
+            results = []
+            for e in entries:
+                try:
+                    p = parse_sheet_from_xl(xl, e['sheet_idx'], profile_name, col_indices)
+                    if p and p.get('answers'):
+                        results.append(p)
+                except Exception:
+                    pass
+            return results
+        # fallback: scan once per handle (cached via xl already open)
+        return _find_and_parse_all(None, prefix, profile_name, col_indices, include_types)
+
+    for qi, sel in enumerate(selections):
+        prefix   = sel['prefix']
+        wording  = sel['wording']
+        sheet_nm = re.sub(r'[\\/*?\[\]:]', '', prefix)[:31]
+
+        if sheet_nm not in wb.sheetnames:
+            wb.create_sheet(title=sheet_nm)
+            toc_entries.append((wording[:80], sheet_nm))
+
+        ws  = wb[sheet_nm]
+        row = 1 if ws.max_row <= 1 else ws.max_row + 2
+
+        if len(files) == 1:
+            parsed_list = _parse_all_from_handle(
+                file_handles[0], prefix, col_indices, include_types)
+            for p in parsed_list:
+                row = _write_table(ws, row, p['wording'], col_names,
+                                   p['base_vals'], p['answers'], p['values'],
+                                   net_start=p.get('net_start'))
+        else:
+            title_cell = ws.cell(row=row, column=1, value=wording[:100])
+            title_cell.font      = XLFont(bold=True, name="Arial", size=12, color="0F2D4A")
+            title_cell.alignment = LEFT
+            ws.merge_cells(start_row=row, start_column=1,
+                           end_row=row, end_column=len(col_names) + 1)
+            row += 2
+            for fi, handle in enumerate(file_handles):
+                parsed_list = _parse_all_from_handle(
+                    handle, prefix, col_indices, include_types)
+                if parsed_list:
+                    for p in parsed_list:
+                        row = _write_table(ws, row, handle['label'], col_names,
+                                           p['base_vals'], p['answers'], p['values'],
+                                           wave_idx=fi, net_start=p.get('net_start'))
+                else:
+                    na_fill = WAVE_FILLS[fi % len(WAVE_FILLS)]
+                    na_font = WAVE_FONTS[fi % len(WAVE_FONTS)]
+                    lbl = ws.cell(row=row, column=1,
+                                  value=f"{handle['label']}  —  not available in this file")
+                    lbl.font = na_font; lbl.fill = na_fill
+                    lbl.alignment = LEFT; lbl.border = BORDER
+                    ws.merge_cells(start_row=row, start_column=1,
+                                   end_row=row, end_column=len(col_names) + 1)
+                    row += 3
+
+        if progress_cb:
+            progress_cb(qi + 1, total_q)
 
     if toc_entries:
         _build_toc(wb, toc_entries)
