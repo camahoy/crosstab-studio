@@ -455,6 +455,125 @@ def extract_slide_data(manifest_row, cache, col_map):
         return {"found": True, "rows": result_rows, "base": base_vals, "wording": wording}
 
 
+# ── Grid slide extraction (brands/CEOs as columns, statements as rows) ─────────
+
+def extract_grid_slide(manifest_row, w4_caches, w4_col_maps,
+                       w3_caches=None, w3_col_maps=None):
+    """
+    For Grid_ prefixes: each entity has its own sheet with statements as rows.
+    Returns data structured for a pivot table: entities (brands/CEOs) are columns,
+    statement rows are rows.
+
+    Returns dict per audience:
+    {
+      audience: {
+        "statements": [str],
+        "brands": [str],
+        "base": {brand: n},
+        "w4": {statement: {brand: val}},
+        "w3": {statement: {brand: val}} or {},
+      }
+    }
+    """
+    prefix    = manifest_row["prefix"]
+    brands    = manifest_row["brands"]
+    audiences = manifest_row["audiences"]
+    metric    = manifest_row["metric"]
+
+    def _extract_for_cache(caches, col_maps):
+        # {brand: {statement: {aud: val}}, base: {brand: {aud: n}}}
+        brand_stmts  = {b: {} for b in brands}
+        brand_base   = {b: {} for b in brands}
+        stmt_order   = []
+
+        for fi, cache in enumerate(caches):
+            cm        = col_maps[fi] if fi < len(col_maps) else {}
+            cache_cols = cache.get_columns()
+
+            # aud → position in parsed values list
+            aud_pos = {}
+            for aud in audiences:
+                ci = cm.get(aud)
+                if ci is not None and ci in cache_cols:
+                    aud_pos[aud] = cache_cols.index(ci)
+
+            if not aud_pos:
+                continue
+
+            all_sheets = cache.entries_for(prefix)
+
+            for brand in brands:
+                matched_si = None
+                for si, word, stype in all_sheets:
+                    if _find_brand_in_wording(word, [brand]):
+                        matched_si = si
+                        break
+
+                if matched_si is None:
+                    continue
+
+                p = cache.parsed_sheet(matched_si)
+                if not p:
+                    continue
+
+                answers = p.get("answers", [])
+                values  = p.get("values", [])
+                bv_row  = p.get("base_vals", [])
+
+                for aud, pos in aud_pos.items():
+                    bv = bv_row[pos] if pos < len(bv_row) else None
+                    if bv is not None and aud not in brand_base[brand]:
+                        brand_base[brand][aud] = int(bv) if isinstance(bv, float) else bv
+
+                for i, stmt in enumerate(answers):
+                    if stmt not in stmt_order:
+                        stmt_order.append(stmt)
+                    if stmt not in brand_stmts[brand]:
+                        brand_stmts[brand][stmt] = {}
+                    vals = values[i] if i < len(values) else []
+                    for aud, pos in aud_pos.items():
+                        if aud not in brand_stmts[brand][stmt]:
+                            v = vals[pos] if pos < len(vals) else None
+                            brand_stmts[brand][stmt][aud] = _fmt(v)
+
+        return stmt_order, brand_stmts, brand_base
+
+    w4_stmts, w4_brand, w4_base = _extract_for_cache(w4_caches, w4_col_maps)
+    w3_stmts, w3_brand, w3_base = (
+        _extract_for_cache(w3_caches or [], w3_col_maps or [])
+        if w3_caches else ([], {b: {} for b in brands}, {b: {} for b in brands})
+    )
+
+    # Organise per audience
+    result = {}
+    for aud in audiences:
+        w4_tbl = {}
+        for stmt in w4_stmts:
+            w4_tbl[stmt] = {b: w4_brand[b].get(stmt, {}).get(aud) for b in brands}
+        w3_tbl = {}
+        if w3_caches and w3_stmts:
+            for stmt in w3_stmts:
+                w3_tbl[stmt] = {b: w3_brand[b].get(stmt, {}).get(aud) for b in brands}
+        result[aud] = {
+            "statements": w4_stmts,
+            "brands":     brands,
+            "base":       {b: w4_base[b].get(aud) for b in brands},
+            "w4":         w4_tbl,
+            "w3":         w3_tbl,
+        }
+    return result
+
+
+def _delta_str(v4, v3):
+    """Format inline change indicator like W3 report style: '+3pp' / '-2pp' / '(-)' """
+    if not isinstance(v4, int) or not isinstance(v3, int):
+        return ""
+    d = v4 - v3
+    if d == 0:
+        return " (-)"
+    return f" (+{d}pp)" if d > 0 else f" ({d}pp)"
+
+
 # ── Excel builder ─────────────────────────────────────────────────────────────
 
 def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
@@ -559,9 +678,9 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
             is_missing = prefix in missing_prefixes
             is_new_q   = mrow["wave_compare"].lower() == "n/a - new"
 
-            # Build effective col maps for this slide
-            w4_map = _merged_col_map(w4_col_maps, audiences)
-            w3_map = _merged_col_map(w3_col_maps, audiences) if w3_files else {}
+            # Grid slides (Grid_ prefix with multiple brands) use pivot layout:
+            # brands/CEOs as columns, statements as rows — matches report table format
+            is_grid = prefix.startswith("Grid_") and bool(mrow["brands"])
 
             # Merge data from ALL current-wave caches so subgroup banners contribute
             def _merge_cache_data(caches, col_maps):
@@ -585,12 +704,13 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
                     "wording": wording,
                 }
 
-            w4_data = _merge_cache_data(w4_caches, w4_col_maps)
-            w3_data = (
-                _merge_cache_data(w3_caches, w3_col_maps)
-                if do_wave and w3_caches
-                else {"found": False, "rows": [], "base": {}, "wording": ""}
-            )
+            if not is_grid:
+                w4_data = _merge_cache_data(w4_caches, w4_col_maps)
+                w3_data = (
+                    _merge_cache_data(w3_caches, w3_col_maps)
+                    if do_wave and w3_caches
+                    else {"found": False, "rows": [], "base": {}, "wording": ""}
+                )
 
             # ── Slide header ──────────────────────────────────────────
             slide_text = f"Slide {mrow['slide']}: {mrow['title']}"
@@ -617,6 +737,95 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
                 current_row += 1
 
             if is_missing:
+                current_row += 1
+                continue
+
+            # ── GRID layout: brands/CEOs as columns, statements as rows ───────
+            if is_grid:
+                grid = extract_grid_slide(
+                    mrow, w4_caches, w4_col_maps,
+                    w3_caches if do_wave else None,
+                    w3_col_maps if do_wave else None,
+                )
+
+                for aud in audiences:
+                    aud_grid = grid.get(aud, {})
+                    stmts    = aud_grid.get("statements", [])
+                    brands   = aud_grid.get("brands", mrow["brands"])
+                    w4_tbl   = aud_grid.get("w4", {})
+                    w3_tbl   = aud_grid.get("w3", {})
+                    base_map = aud_grid.get("base", {})
+
+                    # Audience sub-label
+                    al = ws.cell(row=current_row, column=1, value=aud)
+                    al.font   = _f(bold=True, size=9, color="0F2D4A")
+                    al.fill   = HEADER_FILL
+                    al.alignment = LEFT
+                    current_row += 1
+
+                    # Header row: blank | Brand1 | Brand2 | ...
+                    ws.cell(row=current_row, column=1, value="").fill = HEADER_FILL
+                    for bi, brand in enumerate(brands):
+                        hc = ws.cell(row=current_row, column=2 + bi, value=brand)
+                        hc.font  = HEADER_FONT
+                        hc.fill  = HEADER_FILL
+                        hc.alignment = CTR
+                        ws.column_dimensions[get_column_letter(2 + bi)].width = max(
+                            14, len(brand) + 2)
+                    current_row += 1
+
+                    # Base row
+                    any_base = any(v is not None for v in base_map.values())
+                    if any_base:
+                        bc_cell = ws.cell(row=current_row, column=1, value="Base (n)")
+                        bc_cell.font = _f(bold=True, size=8, color="6B7280")
+                        bc_cell.alignment = LEFT
+                        for bi, brand in enumerate(brands):
+                            bv = base_map.get(brand)
+                            if bv is not None:
+                                c2 = ws.cell(row=current_row, column=2 + bi, value=bv)
+                                c2.font = _f(size=8, color="6B7280")
+                                c2.alignment = CTR
+                        current_row += 1
+
+                    # Statement rows
+                    alt = False
+                    for stmt in stmts:
+                        row_fill = _fill("F6F8FA") if alt else _fill("FFFFFF")
+                        alt = not alt
+
+                        lc = ws.cell(row=current_row, column=1, value=stmt)
+                        lc.font      = LABEL_FONT
+                        lc.fill      = row_fill
+                        lc.alignment = LEFT
+                        lc.border    = THIN_BORDER
+
+                        for bi, brand in enumerate(brands):
+                            v4 = w4_tbl.get(stmt, {}).get(brand)
+                            v3 = w3_tbl.get(stmt, {}).get(brand) if do_wave else None
+
+                            delta = _delta_str(v4, v3) if do_wave else ""
+                            disp  = (f"{v4}%{delta}" if isinstance(v4, int)
+                                     else (str(v4) if v4 else "—"))
+
+                            dc = ws.cell(row=current_row, column=2 + bi, value=disp)
+                            dc.font      = BODY_FONT
+                            dc.fill      = row_fill
+                            dc.alignment = CTR
+                            dc.border    = THIN_BORDER
+
+                        current_row += 1
+
+                    if not stmts:
+                        nc = ws.cell(row=current_row, column=1, value="(no data extracted)")
+                        nc.font = _f(size=9, color="9CA3AF")
+                        current_row += 1
+
+                    current_row += 1  # spacer between audiences
+
+                if progress_cb:
+                    progress_cb(slide_done, total_slides)
+                slide_done += 1
                 current_row += 1
                 continue
 
