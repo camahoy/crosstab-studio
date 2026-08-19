@@ -140,6 +140,7 @@ def parse_manifest_csv(csv_bytes):
         slide = r.get("Slide", "").strip()
         if not slide:
             continue
+        layout_raw = r.get("Table_Layout", "").strip().lower()
         rows.append({
             "slide":        slide,
             "section":      r.get("Section", "").strip(),
@@ -151,6 +152,9 @@ def parse_manifest_csv(csv_bytes):
             "audiences":    [a.strip() for a in r.get("Audiences", "").split("|") if a.strip()],
             "wave_compare": r.get("Wave_Compare", "").strip(),
             "notes":        r.get("Notes", "").strip(),
+            # pivot = brands/entities as columns, statements as rows (matches most report tables)
+            # standard = brands as rows, audiences as columns
+            "table_layout": "pivot" if layout_raw == "pivot" else "standard",
         })
     return rows
 
@@ -678,9 +682,9 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
             is_missing = prefix in missing_prefixes
             is_new_q   = mrow["wave_compare"].lower() == "n/a - new"
 
-            # Grid slides (Grid_ prefix with multiple brands) use pivot layout:
-            # brands/CEOs as columns, statements as rows — matches report table format
-            is_grid = prefix.startswith("Grid_") and bool(mrow["brands"])
+            # Pivot layout: brands/CEOs as columns, statements as rows — matches report table format
+            # Controlled explicitly by Table_Layout column in manifest CSV (value: "pivot")
+            is_grid = mrow["table_layout"] == "pivot" and bool(mrow["brands"])
 
             # Merge data from ALL current-wave caches so subgroup banners contribute
             def _merge_cache_data(caches, col_maps):
@@ -1014,7 +1018,9 @@ def show_manifest_builder():
         st.markdown(
             "<div style='font-size:0.72rem;color:#6B7280;margin-bottom:6px'>"
             "CSV with columns: Slide, Section, Slide_Title, Question_Code, Sheet_Type, "
-            "Metric, Brands_Entities, Audiences, Wave_Compare, Notes"
+            "Metric, Brands_Entities, Audiences, Wave_Compare, Table_Layout, Notes — "
+            "Table_Layout: <em>pivot</em> = brands/CEOs as columns, statements as rows; "
+            "<em>standard</em> (default) = brands as rows, audiences as columns"
             "</div>", unsafe_allow_html=True,
         )
         manifest_file = st.file_uploader(
