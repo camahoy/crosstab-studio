@@ -9,6 +9,7 @@ from engine import (fast_scan, get_columns, generate_excel, generate_word,
                     detect_and_describe, read_toc, toc_to_groups,
                     deep_scan_file, save_user_profile)
 from profiles import get_profile_names, get_profile
+from manifest_builder import show_manifest_builder
 
 def _show_preview(rows, q0, h0, b0, d0):
     """Render a color-coded row preview table for the format wizard."""
@@ -101,6 +102,29 @@ st.markdown("""
     <div class="cs-sub">Research output formatter</div>
 </div>
 """, unsafe_allow_html=True)
+
+# ── Tab switcher ──────────────────────────────────────────────
+_TABS = ["Crosstab Explorer", "Manifest Builder"]
+if "active_tab" not in st.session_state:
+    st.session_state.active_tab = _TABS[0]
+
+_tab_cols = st.columns(len(_TABS) + 4)
+for _ti, _tlabel in enumerate(_TABS):
+    with _tab_cols[_ti]:
+        _active = st.session_state.active_tab == _tlabel
+        if st.button(
+            _tlabel,
+            key=f"tab_btn_{_ti}",
+            type="primary" if _active else "secondary",
+        ):
+            st.session_state.active_tab = _tlabel
+            st.rerun()
+
+st.markdown("<hr style='margin-top:0.5rem;margin-bottom:1.5rem'>", unsafe_allow_html=True)
+
+if st.session_state.active_tab == "Manifest Builder":
+    show_manifest_builder()
+    st.stop()
 
 # ── State ─────────────────────────────────────────────────────
 for k, v in {
