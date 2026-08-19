@@ -1,6 +1,6 @@
 """
-manifest_builder.py — Manifest Builder for Crosstab Studio
-Takes a slide manifest CSV + W4 banner(s) + optional W3 banner(s),
+manifest_builder.py — Custom Cuts for Crosstab Studio
+Takes a cuts spec CSV + current-wave banner(s) + optional previous-wave banner(s),
 extracts specified metrics per slide, writes structured Excel output.
 """
 
@@ -402,8 +402,8 @@ def extract_slide_data(manifest_row, file_bytes, profile_name, col_map):
 
 # ── Excel builder ─────────────────────────────────────────────────────────────
 
-def build_manifest_excel(manifest_rows, w4_files, w3_files, profile_name,
-                         missing_prefixes, new_prefixes):
+def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
+                     missing_prefixes, new_prefixes):
     """
     Build the output Excel.
     w4_files / w3_files: list of {bytes, label, name}
@@ -533,23 +533,23 @@ def build_manifest_excel(manifest_rows, w4_files, w3_files, profile_name,
 
             for aud in audiences:
                 if do_wave:
-                    c_w4 = ws.cell(row=current_row, column=col_cursor, value=f"{aud} W4")
+                    c_w4 = ws.cell(row=current_row, column=col_cursor, value=aud)
                     c_w4.font = HEADER_FONT
                     c_w4.fill = HEADER_FILL
                     c_w4.alignment = CTR
                     ws.column_dimensions[get_column_letter(col_cursor)].width = 12
 
-                    c_w3 = ws.cell(row=current_row, column=col_cursor + 1, value=f"{aud} W3")
+                    c_w3 = ws.cell(row=current_row, column=col_cursor + 1, value=f"{aud} (Prev)")
                     c_w3.font = _f(bold=True, size=9, color="374151")
                     c_w3.fill = W3_FILL
                     c_w3.alignment = CTR
-                    ws.column_dimensions[get_column_letter(col_cursor + 1)].width = 12
+                    ws.column_dimensions[get_column_letter(col_cursor + 1)].width = 14
 
                     c_d = ws.cell(row=current_row, column=col_cursor + 2, value="Δ")
                     c_d.font = DELTA_FONT
                     c_d.fill = DELTA_FILL
                     c_d.alignment = CTR
-                    ws.column_dimensions[get_column_letter(col_cursor + 2)].width = 8
+                    ws.column_dimensions[get_column_letter(col_cursor + 2)].width = 7
 
                     col_map_pos[aud] = (col_cursor, col_cursor + 1, col_cursor + 2)
                     col_cursor += 3
@@ -673,7 +673,7 @@ def build_manifest_excel(manifest_rows, w4_files, w3_files, profile_name,
         r += 1
 
     for p in sorted(new_prefixes):
-        c1 = ws_f.cell(row=r, column=1, value="NEW IN W4")
+        c1 = ws_f.cell(row=r, column=1, value="NEW THIS WAVE")
         c1.font = _f(bold=True, size=9, color="166534")
         c1.fill = NEW_FILL
         c2 = ws_f.cell(row=r, column=2, value=p)
@@ -692,9 +692,9 @@ def build_manifest_excel(manifest_rows, w4_files, w3_files, profile_name,
 
 def show_manifest_builder():
     st.markdown(
-        "<div style='font-size:0.82rem;color:#374151;margin-bottom:12px'>"
-        "Upload a slide manifest CSV and your W4 banner file(s). "
-        "The builder will extract the specified metric per slide and write a structured Excel output."
+        "<div style='font-size:0.82rem;color:#374151;margin-bottom:16px'>"
+        "Upload your cuts spec CSV and banner file(s) from the DP team. "
+        "The tool extracts exactly the metrics you need and outputs clean, report-ready tables."
         "</div>",
         unsafe_allow_html=True,
     )
@@ -702,49 +702,55 @@ def show_manifest_builder():
     col_l, col_r = st.columns([1, 1])
 
     with col_l:
-        st.markdown('<div class="step-label">Manifest CSV</div>', unsafe_allow_html=True)
+        st.markdown('<div class="step-label">Cuts spec (CSV)</div>', unsafe_allow_html=True)
+        st.markdown(
+            "<div style='font-size:0.72rem;color:#6B7280;margin-bottom:6px'>"
+            "CSV with columns: Slide, Section, Slide_Title, Question_Code, Sheet_Type, "
+            "Metric, Brands_Entities, Audiences, Wave_Compare, Notes"
+            "</div>", unsafe_allow_html=True,
+        )
         manifest_file = st.file_uploader(
-            "Upload manifest CSV",
+            "Upload cuts spec CSV",
             type=["csv"],
             key="mb_manifest",
             label_visibility="collapsed",
         )
 
     with col_r:
-        st.markdown('<div class="step-label">Format profile</div>', unsafe_allow_html=True)
+        st.markdown('<div class="step-label">Banner format</div>', unsafe_allow_html=True)
         profile_names = [p for p in get_profile_names() if p != "+ Add new format"]
         mb_profile = st.selectbox(
             "Profile",
             profile_names,
             key="mb_profile",
             label_visibility="collapsed",
-            help="Select the banner format profile. Use 'Corporate Reputation' for GQR-style banners.",
+            help="Select the banner format. Use 'Corporate Reputation' for GQR-style banners.",
         )
 
-    st.markdown('<div class="step-label" style="margin-top:12px">W4 Banner file(s)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="step-label" style="margin-top:16px">Current wave banner(s)</div>', unsafe_allow_html=True)
     st.markdown(
-        "<div style='font-size:0.76rem;color:#6B7280;margin-bottom:6px'>"
-        "Upload one or more W4 banner Excel files. If audiences are split across files, upload all of them."
+        "<div style='font-size:0.72rem;color:#6B7280;margin-bottom:6px'>"
+        "Upload one or more banner Excel files from the DP team. If audiences are split across separate files, upload all of them here."
         "</div>",
         unsafe_allow_html=True,
     )
     w4_uploads = st.file_uploader(
-        "W4 banners",
+        "Current wave banners",
         type=["xlsx", "xls"],
         accept_multiple_files=True,
         key="mb_w4",
         label_visibility="collapsed",
     )
 
-    with st.expander("W3 banner files (optional — for wave comparison)", expanded=False):
+    with st.expander("Previous wave banners — Trended (optional)", expanded=False):
         st.markdown(
-            "<div style='font-size:0.76rem;color:#6B7280;margin-bottom:6px'>"
-            "Upload W3 banner file(s) to compute delta columns (W4 – W3)."
+            "<div style='font-size:0.72rem;color:#6B7280;margin-bottom:6px'>"
+            "Upload previous-wave banner file(s) to add a Trended column and Δ change for each metric."
             "</div>",
             unsafe_allow_html=True,
         )
         w3_uploads = st.file_uploader(
-            "W3 banners",
+            "Previous wave banners",
             type=["xlsx", "xls"],
             accept_multiple_files=True,
             key="mb_w3",
@@ -752,38 +758,38 @@ def show_manifest_builder():
         )
 
     if not manifest_file or not w4_uploads:
-        st.info("Upload a manifest CSV and at least one W4 banner to continue.")
+        st.info("Upload a cuts spec CSV and at least one current-wave banner to continue.")
         return
 
-    # Parse manifest
     manifest_rows = parse_manifest_csv(manifest_file.getvalue())
     if not manifest_rows:
-        st.error("Could not parse the manifest CSV — check the file format.")
+        st.error("Could not parse the cuts spec CSV — check the file format.")
         return
 
+    n_sections = len({r["section"] for r in manifest_rows})
+    trended    = bool(w3_uploads)
     st.markdown(
-        f'<span class="stat-pill">{len(manifest_rows)} slides</span>'
-        f'<span class="stat-pill">{len({r["section"] for r in manifest_rows})} sections</span>'
-        f'<span class="stat-pill">{len(w4_uploads)} W4 file(s)</span>'
-        + (f'<span class="stat-pill">{len(w3_uploads)} W3 file(s)</span>' if w3_uploads else ""),
+        f'<span class="stat-pill">{len(manifest_rows)} cuts</span>'
+        f'<span class="stat-pill">{n_sections} section{"s" if n_sections != 1 else ""}</span>'
+        f'<span class="stat-pill">{len(w4_uploads)} banner file{"s" if len(w4_uploads) != 1 else ""}</span>'
+        + (f'<span class="stat-pill">Trended ✓</span>' if trended else ""),
         unsafe_allow_html=True,
     )
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-    # Preview manifest
-    with st.expander("Preview manifest", expanded=False):
+    with st.expander("Preview cuts spec", expanded=False):
         df_prev = pd.DataFrame([{
-            "Slide": r["slide"],
-            "Section": r["section"],
-            "Title": r["title"][:50],
-            "Prefix": r["prefix"],
-            "Metric": r["metric"],
+            "Slide":     r["slide"],
+            "Section":   r["section"],
+            "Title":     r["title"][:50],
+            "Code":      r["prefix"],
+            "Metric":    r["metric"],
             "Audiences": ", ".join(r["audiences"]),
-            "Wave": r["wave_compare"],
+            "Trended":   "Yes" if r["wave_compare"].lower().startswith("w") else "—",
         } for r in manifest_rows])
         st.dataframe(df_prev, use_container_width=True, hide_index=True)
 
-    if st.button("◈  Build manifest Excel", key="mb_run"):
+    if st.button("◈  Build custom cuts Excel", key="mb_run"):
         w4_files = [{"bytes": f.getvalue(), "label": f.name, "name": f.name}
                     for f in w4_uploads]
         w3_files = [{"bytes": f.getvalue(), "label": f.name, "name": f.name}
@@ -791,41 +797,35 @@ def show_manifest_builder():
 
         with st.spinner("Scanning banners and extracting metrics…"):
             try:
-                # Inventory all W4 prefixes
                 all_w4_prefixes = set()
                 for finfo in w4_files:
                     all_w4_prefixes |= get_all_prefixes(finfo["bytes"], mb_profile)
 
-                # Determine flags
-                manifest_prefixes = {r["prefix"] for r in manifest_rows if r["prefix"]}
-                missing_prefixes  = manifest_prefixes - all_w4_prefixes
-                new_prefixes      = all_w4_prefixes - manifest_prefixes
+                spec_prefixes    = {r["prefix"] for r in manifest_rows if r["prefix"]}
+                missing_prefixes = spec_prefixes - all_w4_prefixes
+                new_prefixes     = all_w4_prefixes - spec_prefixes
 
                 if missing_prefixes:
                     st.warning(
-                        f"⚠ {len(missing_prefixes)} prefix(es) in the manifest not found in W4 banner: "
+                        f"⚠ {len(missing_prefixes)} code(s) in your spec not found in banner: "
                         + ", ".join(sorted(missing_prefixes))
                     )
                 if new_prefixes:
                     st.info(
-                        f"★ {len(new_prefixes)} prefix(es) in W4 banner not in manifest (new this wave): "
+                        f"★ {len(new_prefixes)} code(s) in the banner not in your spec (new this wave): "
                         + ", ".join(sorted(new_prefixes))
                     )
 
-                # Build Excel
-                result_bytes = build_manifest_excel(
+                result_bytes = build_cuts_excel(
                     manifest_rows, w4_files, w3_files, mb_profile,
                     missing_prefixes, new_prefixes,
                 )
 
-                st.success(
-                    f"Done — {len(manifest_rows)} slides across "
-                    f"{len({r['section'] for r in manifest_rows})} sections"
-                )
+                st.success(f"Done — {len(manifest_rows)} cuts across {n_sections} sections")
                 st.download_button(
-                    label="⬇  Download manifest Excel",
+                    label="⬇  Download custom cuts Excel",
                     data=result_bytes,
-                    file_name="manifest_output.xlsx",
+                    file_name="custom_cuts.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="mb_download",
                 )

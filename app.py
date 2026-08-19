@@ -104,7 +104,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Tab switcher ──────────────────────────────────────────────
-_TABS = ["Crosstab Explorer", "Manifest Builder"]
+_TABS = ["Crosstab Explorer", "Custom Cuts"]
 if "active_tab" not in st.session_state:
     st.session_state.active_tab = _TABS[0]
 
@@ -122,7 +122,7 @@ for _ti, _tlabel in enumerate(_TABS):
 
 st.markdown("<hr style='margin-top:0.5rem;margin-bottom:1.5rem'>", unsafe_allow_html=True)
 
-if st.session_state.active_tab == "Manifest Builder":
+if st.session_state.active_tab == "Custom Cuts":
     show_manifest_builder()
     st.stop()
 
