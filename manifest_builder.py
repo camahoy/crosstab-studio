@@ -23,7 +23,8 @@ class BannerCache:
     Pre-parses all sheets from a banner file in a single pass.
     Holds parsed data in memory; no repeated file opens.
     """
-    def __init__(self, file_bytes, profile_name, col_indices, progress_cb=None):
+    def __init__(self, file_bytes, profile_name, col_indices,
+                 prefixes_needed=None, progress_cb=None):
         self.profile_name = profile_name
         self.col_indices  = col_indices
 
@@ -48,8 +49,13 @@ class BannerCache:
 
         self._prefix_map = prefix_to_entries  # prefix -> [entry]
 
-        # Parse every referenced sheet once
-        all_indices = sorted({e["sheet_idx"] for e in self._toc})
+        # Only parse sheets we actually need (those referenced by the manifest)
+        if prefixes_needed is not None:
+            needed = [e for e in self._toc if e["prefix"] in prefixes_needed]
+        else:
+            needed = self._toc
+
+        all_indices = sorted({e["sheet_idx"] for e in needed})
         self._parsed = {}  # sheet_idx -> parsed dict
         for i, si in enumerate(all_indices):
             p = _engine.parse_sheet(file_bytes, si, profile_name, col_indices)
@@ -498,15 +504,19 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
             next_frac = (file_i + 1) / max(total_files, 1)
             progress_cb(file_frac + (done / max(total, 1)) * (next_frac - file_frac), 1.0)
 
+    spec_prefixes = {r["prefix"] for r in manifest_rows if r["prefix"]}
+
     w4_caches = []
     for fi, finfo in enumerate(w4_files):
         bc = BannerCache(finfo["bytes"], profile_name, all_w4_cols,
+                         prefixes_needed=spec_prefixes,
                          progress_cb=lambda d, t, _fi=fi: _sheet_progress(_fi, d, t))
         w4_caches.append(bc)
 
     w3_caches = []
     for fi, finfo in enumerate(w3_files):
         bc = BannerCache(finfo["bytes"], profile_name, all_w3_cols,
+                         prefixes_needed=spec_prefixes,
                          progress_cb=lambda d, t, _fi=fi: _sheet_progress(n_w4 + _fi, d, t))
         w3_caches.append(bc)
 
