@@ -137,15 +137,16 @@ def parse_manifest_csv(csv_bytes):
     reader = csv.DictReader(io.StringIO(text))
     rows = []
     for r in reader:
-        slide = r.get("Slide", "").strip()
-        if not slide:
+        slide  = r.get("Slide", "").strip()
+        prefix = r.get("Question_Code", "").strip()
+        if not slide and not prefix:
             continue
         layout_raw = r.get("Table_Layout", "").strip().lower()
         rows.append({
             "slide":        slide,
             "section":      r.get("Section", "").strip(),
             "title":        r.get("Slide_Title", "").strip(),
-            "prefix":       r.get("Question_Code", "").strip(),
+            "prefix":       prefix,
             "sheet_type":   r.get("Sheet_Type", "").strip(),
             "metric":       r.get("Metric", "").strip(),
             "brands":       [b.strip() for b in r.get("Brands_Entities", "").split("|") if b.strip() and b.strip().upper() != "N/A"],
@@ -366,6 +367,33 @@ def _find_brand_in_wording(wording, brands):
     return None
 
 
+def _pick_brand_sheet(all_sheets, brand, metric):
+    """
+    Return (sheet_idx, wording) for the best sheet matching brand.
+    Prefers sheets whose sheet_type contains the metric keyword
+    (e.g. metric='T2B' → prefers '[T2B - Summary]' over '[Summary Grid]').
+    Falls back to the first brand-matching sheet.
+    """
+    metric_key = metric.strip().lower()
+    # Normalise common metric names to their banner suffix keywords
+    pref = None
+    if metric_key in ('t2b', 'top 2 box', 'top 2 box (net)'):
+        pref = 't2b'
+    elif metric_key in ('b2b', 'bottom 2 box', 'bottom 2 box (net)'):
+        pref = 'b2b'
+    elif metric_key in ('mean', 'summary - mean'):
+        pref = 'mean'
+
+    first_match = None
+    for si, word, stype in all_sheets:
+        if _find_brand_in_wording(word, [brand]):
+            if first_match is None:
+                first_match = (si, word)
+            if pref and pref in stype.lower():
+                return si, word
+    return (first_match[0], first_match[1]) if first_match else (None, "")
+
+
 # ── Slide data extraction ─────────────────────────────────────────────────────
 
 def extract_slide_data(manifest_row, cache, col_map):
@@ -410,12 +438,7 @@ def extract_slide_data(manifest_row, cache, col_map):
         wording_seen = ""
 
         for brand in brands:
-            matched_si = None
-            for si, word, stype in all_sheets:
-                if _find_brand_in_wording(word, [brand]):
-                    matched_si   = si
-                    wording_seen = word
-                    break
+            matched_si, wording_seen = _pick_brand_sheet(all_sheets, brand, metric)
 
             if matched_si is None:
                 result_rows.append((brand, {aud: None for aud in aud_order}))
@@ -526,11 +549,7 @@ def extract_grid_slide(manifest_row, w4_caches, w4_col_maps,
             all_sheets = cache.entries_for(prefix)
 
             for brand in brands:
-                matched_si = None
-                for si, word, stype in all_sheets:
-                    if _find_brand_in_wording(word, [brand]):
-                        matched_si = si
-                        break
+                matched_si, _ = _pick_brand_sheet(all_sheets, brand, metric)
 
                 if matched_si is None:
                     continue
@@ -753,7 +772,8 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
                 )
 
             # ── Slide header ──────────────────────────────────────────
-            slide_text = f"Slide {mrow['slide']}: {mrow['title']}"
+            _id = mrow['prefix'] or (f"Slide {mrow['slide']}" if mrow['slide'] else "")
+            slide_text = f"{_id}: {mrow['title']}" if mrow['title'] else _id
             if is_missing:
                 slide_text += "  ⚠ NOT FOUND IN BANNER"
             elif is_new_q:
