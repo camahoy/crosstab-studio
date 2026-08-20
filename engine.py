@@ -285,6 +285,8 @@ def _find_header_row(raw, max_rows=35):
     """
     Find the row that contains 'Total' as a column header value.
     Skips rows where the majority of non-blank values are single letters (sig-code rows).
+    When the first 'Total' row is sparse (group-label row in two-level headers),
+    checks the next row — if it is denser and not all sig-codes, returns it instead.
     Returns row index or None.
     """
     for ri, row in enumerate(raw[:max_rows]):
@@ -299,9 +301,20 @@ def _find_header_row(raw, max_rows=35):
         if single_letter >= len(str_vals) / 2:
             continue
         # Look for an exact 'total' match in any column
-        for v in str_vals:
-            if v.lower() == 'total' or v.lower().startswith('total respondent'):
-                return ri
+        has_total = any(v.lower() == 'total' or v.lower().startswith('total respondent')
+                        for v in str_vals)
+        if has_total:
+            # Two-level header detection: if this row is sparse (≤3 non-blank values),
+            # it may be a group-label row (e.g. only "Total" is visible because subgroup
+            # headers span merged cells). Check if the immediately next row is denser.
+            if len(str_vals) <= 3 and ri + 1 < len(raw):
+                next_row = raw[ri + 1]
+                next_vals = [str(v).strip() for v in (next_row or [])
+                             if v is not None and str(v).strip() not in ('', 'nan', 'None', '\xa0')]
+                next_sig = sum(1 for s in next_vals if len(s) == 1 and s.isalpha())
+                if len(next_vals) > len(str_vals) and next_sig < len(next_vals) / 2:
+                    return ri + 1
+            return ri
     return None
 
 
