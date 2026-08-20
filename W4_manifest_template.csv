@@ -46,5 +46,7 @@ Slide,Section,Slide_Title,Question_Code,Sheet_Type,Metric,Brands_Entities,Audien
 61,Commerce,Shopping Experience Attributes — Gen Pop,GO43,Per Brand,T2B,"Google|Amazon|OpenAI's ChatGPT|Shopify|Walmart.com",Gen Pop,W3,standard,OPTIONS CHANGED W3→W4
 63,Media Consumption,News Consumption Frequency,godem7,,All options,,Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
 64,Media Consumption,Trusted News Mediums,godem9,,T2B,,Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
-,W4 New,FILL IN TITLE,GO44,,,,Gen Pop|Tech Elites|AI Fans|Gen Z,,standard,NEW W4 QUESTION — fill in Slide/Title/Metric/Brands; no W3 trend available
-,W4 New,FILL IN TITLE,GO46,,,,Gen Pop|Tech Elites|AI Fans|Gen Z,,standard,NEW W4 QUESTION — fill in Slide/Title/Metric/Brands; no W3 trend available
+,W4 New,FILL IN TITLE,GO44,,T2B,,Gen Pop|Tech Elites|AI Fans|Gen Z,,standard,Statement pairs — fill in Slide/Title; no W3 trend
+,W4 New,FILL IN TITLE,GO46,,T2B,,Gen Pop|Tech Elites|AI Fans|Gen Z,,standard,Fill in Slide/Title; no W3 trend
+,W4 New,FILL IN TITLE,GO46,,B2B,,Gen Pop|Tech Elites|AI Fans|Gen Z,,standard,
+,W4 New,FILL IN TITLE,GO46,,Neutral,,Gen Pop|Tech Elites|AI Fans|Gen Z,,standard,
