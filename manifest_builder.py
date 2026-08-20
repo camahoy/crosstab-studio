@@ -208,6 +208,25 @@ def get_audience_col_map(file_bytes, profile_name, audience_list):
     return {aud: _match_col_for_audience(cols, aud) for aud in audience_list}
 
 
+def get_total_col_map(file_bytes, profile_name, label):
+    """
+    Return {label: col_idx} where col_idx is the 'Total' column in this file.
+    Used when each banner file represents one audience and all have a 'Total' column.
+    """
+    cols = _engine.get_columns(file_bytes, profile_name)
+    # Find 'Total' column — try exact match then common patterns
+    for idx, name, sub in cols:
+        if name.strip().lower() == "total":
+            return {label: idx}
+    for idx, name, sub in cols:
+        if "total" in (name + " " + sub).lower():
+            return {label: idx}
+    # Fallback to first column
+    if cols:
+        return {label: cols[0][0]}
+    return {}
+
+
 # ── TOC inventory ─────────────────────────────────────────────────────────────
 
 def get_all_prefixes(file_bytes, profile_name):
@@ -581,10 +600,14 @@ def _delta_str(v4, v3):
 # ── Excel builder ─────────────────────────────────────────────────────────────
 
 def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
-                     missing_prefixes, new_prefixes, progress_cb=None):
+                     missing_prefixes, new_prefixes, progress_cb=None,
+                     w4_labels=None, w3_labels=None):
     """
     Build the output Excel.
     w4_files / w3_files: list of {bytes, label, name}
+    w4_labels / w3_labels: optional list of audience labels (one per file).
+        When provided, each file's 'Total' column is mapped to its label.
+        When None, audience columns are auto-detected by name matching.
     missing_prefixes: set of prefixes in manifest not found in W4
     new_prefixes: set of prefixes in W4 not in manifest
     """
@@ -601,11 +624,24 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
                 seen_aud.add(a)
 
     # ── Step 2: build col maps (audience → column index) per file ─────────────
-    def _aud_col_map(finfo):
-        return get_audience_col_map(finfo["bytes"], profile_name, all_audiences)
+    # If file labels provided, map each file's Total column to its label.
+    # Otherwise auto-detect audience columns by name.
+    if w4_labels and len(w4_labels) == len(w4_files):
+        w4_col_maps = [get_total_col_map(f["bytes"], profile_name, w4_labels[i])
+                       for i, f in enumerate(w4_files)]
+    else:
+        w4_col_maps = [get_audience_col_map(f["bytes"], profile_name, all_audiences)
+                       for f in w4_files]
 
-    w4_col_maps = [_aud_col_map(f) for f in w4_files]
-    w3_col_maps = [_aud_col_map(f) for f in w3_files] if w3_files else []
+    if w3_files:
+        if w3_labels and len(w3_labels) == len(w3_files):
+            w3_col_maps = [get_total_col_map(f["bytes"], profile_name, w3_labels[i])
+                           for i, f in enumerate(w3_files)]
+        else:
+            w3_col_maps = [get_audience_col_map(f["bytes"], profile_name, all_audiences)
+                           for f in w3_files]
+    else:
+        w3_col_maps = []
 
     def _merged_col_map(col_maps, aud_list):
         result = {}
@@ -1044,7 +1080,8 @@ def show_manifest_builder():
     st.markdown('<div class="step-label" style="margin-top:16px">Current wave banner(s)</div>', unsafe_allow_html=True)
     st.markdown(
         "<div style='font-size:0.72rem;color:#6B7280;margin-bottom:6px'>"
-        "Upload one or more banner Excel files from the DP team. If audiences are split across separate files, upload all of them here."
+        "Upload one or more banner Excel files. If audiences come from separate files (e.g. a Total banner, a Gen Z banner, an AI Fans banner), "
+        "upload all of them here and give each a label matching what you put in the <em>Audiences</em> column of your manifest."
         "</div>",
         unsafe_allow_html=True,
     )
@@ -1056,10 +1093,38 @@ def show_manifest_builder():
         label_visibility="collapsed",
     )
 
+    # Per-file audience labels (shown when >1 file or always for clarity)
+    w4_file_labels = []
+    if w4_uploads:
+        if len(w4_uploads) > 1:
+            st.markdown(
+                "<div style='font-size:0.72rem;color:#374151;margin-top:6px;margin-bottom:4px'>"
+                "<strong>Label each file</strong> — use the same audience name you put in the "
+                "<em>Audiences</em> column of your manifest (e.g. <em>Gen Pop</em>, <em>Gen Z</em>). "
+                "The tool maps each file's Total column to this label."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            label_cols = st.columns(min(len(w4_uploads), 4))
+            for i, uf in enumerate(w4_uploads):
+                with label_cols[i % 4]:
+                    default = uf.name.replace(".xlsx", "").replace(".xls", "")[:20]
+                    lbl = st.text_input(
+                        uf.name[:25],
+                        value=default,
+                        key=f"mb_w4_label_{i}_{uf.name}",
+                        help="Audience name this file represents — must match Audiences column in manifest.",
+                    )
+                    w4_file_labels.append(lbl.strip())
+        else:
+            # Single file — auto-detect columns normally
+            w4_file_labels = []
+
     with st.expander("Previous wave banners — Trended (optional)", expanded=False):
         st.markdown(
             "<div style='font-size:0.72rem;color:#6B7280;margin-bottom:6px'>"
-            "Upload previous-wave banner file(s) to add a Trended column and Δ change for each metric."
+            "Upload previous-wave banner file(s) to add a Trended column and Δ change for each metric. "
+            "Label each file to match its audience."
             "</div>",
             unsafe_allow_html=True,
         )
@@ -1070,6 +1135,23 @@ def show_manifest_builder():
             key="mb_w3",
             label_visibility="collapsed",
         )
+        w3_file_labels = []
+        if w3_uploads and len(w3_uploads) > 1:
+            st.markdown(
+                "<div style='font-size:0.72rem;color:#374151;margin-top:6px;margin-bottom:4px'>"
+                "Label each previous-wave file:</div>",
+                unsafe_allow_html=True,
+            )
+            w3_label_cols = st.columns(min(len(w3_uploads), 4))
+            for i, uf in enumerate(w3_uploads):
+                with w3_label_cols[i % 4]:
+                    default = uf.name.replace(".xlsx", "").replace(".xls", "")[:20]
+                    lbl = st.text_input(
+                        uf.name[:25],
+                        value=default,
+                        key=f"mb_w3_label_{i}_{uf.name}",
+                    )
+                    w3_file_labels.append(lbl.strip())
 
     if not manifest_file or not w4_uploads:
         st.info("Upload a cuts spec CSV and at least one current-wave banner to continue.")
@@ -1108,6 +1190,9 @@ def show_manifest_builder():
                     for f in w4_uploads]
         w3_files = [{"bytes": f.getvalue(), "label": f.name, "name": f.name}
                     for f in w3_uploads] if w3_uploads else []
+        # Use per-file labels when multiple files were uploaded with explicit labels
+        _w4_labels = w4_file_labels if len(w4_file_labels) == len(w4_files) and len(w4_files) > 1 else None
+        _w3_labels = w3_file_labels if len(w3_file_labels) == len(w3_files) and len(w3_files) > 1 else None
 
         prog_area = st.empty()
         status_area = st.empty()
@@ -1156,6 +1241,8 @@ def show_manifest_builder():
                 manifest_rows, w4_files, w3_files, mb_profile,
                 missing_prefixes, new_prefixes,
                 progress_cb=_build_progress,
+                w4_labels=_w4_labels,
+                w3_labels=_w3_labels,
             )
 
             prog_area.progress(1.0)
