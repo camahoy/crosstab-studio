@@ -5,12 +5,12 @@ Slide,Section,Slide_Title,Question_Code,Sheet_Type,Metric,Brands_Entities,Audien
 6b,Brand Reputation,Trust (T2B),GO6,,T2B,,Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
 8,CEO Reputation,CEO Familiarity (T2B),GO13,,T2B,"Sundar Pichai|Demis Hassabis|Satya Nadella|Sam Altman|Tim Cook|Andy Jassy|Mark Zuckerberg|Dario Amodei",Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
 9,CEO Reputation,CEO Company Match (% correct),GO14,,PCT correct,"Sundar Pichai|Satya Nadella|Sam Altman|Tim Cook|Andy Jassy|Mark Zuckerberg|Dario Amodei",Gen Pop,W3,standard,Demis Hassabis excluded. Gen Pop only.
-10,CEO Reputation,CEO Favorability (T2B) — Aware,Go38,,T2B,"Sundar Pichai|Demis Hassabis|Satya Nadella|Sam Altman|Tim Cook|Andy Jassy|Mark Zuckerberg|Dario Amodei",Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,Aware respondents only
+10,CEO Reputation,CEO Favorability (T2B) — Aware,GO38,,T2B,"Sundar Pichai|Demis Hassabis|Satya Nadella|Sam Altman|Tim Cook|Andy Jassy|Mark Zuckerberg|Dario Amodei",Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,Aware respondents only
 11,CEO Reputation,CEO Trust to Do What Is Right (T2B),GO15,,T2B,"Sundar Pichai|Demis Hassabis|Satya Nadella|Sam Altman|Tim Cook|Andy Jassy|Mark Zuckerberg|Dario Amodei",Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,Aware respondents only
-12,CEO Reputation,CEO Statements — Gen Pop,Go16,Per CEO,T2B,"Sundar Pichai|Demis Hassabis|Dario Amodei|Satya Nadella|Andy Jassy|Tim Cook|Sam Altman|Mark Zuckerberg",Gen Pop,W3,pivot,Statements as rows / CEOs as columns
-14,CEO Reputation,CEO Statements — Tech Elites,Go16,Per CEO,T2B,"Sundar Pichai|Demis Hassabis|Dario Amodei|Satya Nadella|Tim Cook|Andy Jassy|Sam Altman|Mark Zuckerberg",Tech Elites,W3,pivot,
-16,CEO Reputation,CEO Statements — AI Fans,Go16,Per CEO,T2B,"Sundar Pichai|Demis Hassabis|Dario Amodei|Satya Nadella|Andy Jassy|Tim Cook|Sam Altman|Mark Zuckerberg",AI Fans,W3,pivot,
-18,CEO Reputation,CEO Statements — Gen Z,Go16,Per CEO,T2B,"Sundar Pichai|Demis Hassabis|Satya Nadella|Dario Amodei|Andy Jassy|Tim Cook|Sam Altman|Mark Zuckerberg",Gen Z,W3,pivot,
+12,CEO Reputation,CEO Statements — Gen Pop,Grid_GO16,Per CEO,T2B,"Sundar Pichai|Demis Hassabis|Dario Amodei|Satya Nadella|Andy Jassy|Tim Cook|Sam Altman|Mark Zuckerberg",Gen Pop,W3,pivot,Statements as rows / CEOs as columns
+14,CEO Reputation,CEO Statements — Tech Elites,Grid_GO16,Per CEO,T2B,"Sundar Pichai|Demis Hassabis|Dario Amodei|Satya Nadella|Tim Cook|Andy Jassy|Sam Altman|Mark Zuckerberg",Tech Elites,W3,pivot,
+16,CEO Reputation,CEO Statements — AI Fans,Grid_GO16,Per CEO,T2B,"Sundar Pichai|Demis Hassabis|Dario Amodei|Satya Nadella|Andy Jassy|Tim Cook|Sam Altman|Mark Zuckerberg",AI Fans,W3,pivot,
+18,CEO Reputation,CEO Statements — Gen Z,Grid_GO16,Per CEO,T2B,"Sundar Pichai|Demis Hassabis|Satya Nadella|Dario Amodei|Andy Jassy|Tim Cook|Sam Altman|Mark Zuckerberg",Gen Z,W3,pivot,
 22,Search,Search Tool Usage Frequency (T4B),GO31,,T4B,"DuckDuckGo|Google Search|Microsoft Bing|OpenAI's ChatGPT|Perplexity|Grok|Meta's AI Mode|Anthropic's Claude|TikTok|Instagram",Gen Pop|Tech Elites,W3,standard,W4 adds Meta's AI Mode / Anthropic's Claude / TikTok / Instagram
 23,Search,Google Search Attributes (T2B),Grid_GO32,,T2B,Google Search,Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,Single-brand summary; statements as rows subgroups as columns
 25,Search,Search Tool Comparison — Gen Pop,Grid_GO32,Per Tool,T2B,"DuckDuckGo|Google Search|Microsoft Bing|OpenAI's ChatGPT|Perplexity|Grok|Meta's AI Mode|Anthropic's Claude",Gen Pop,W3,pivot,Tools as columns / statements as rows
@@ -24,18 +24,18 @@ Slide,Section,Slide_Title,Question_Code,Sheet_Type,Metric,Brands_Entities,Audien
 34,AI,AI Familiarity,GO17,,All options,,Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
 35,AI,AI Future Optimism,GOdem6,,T2B,,Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
 36,AI,Trust in AI,GO19,,T2B,,Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
-38,AI,Responsible AI Leadership,go21,Per Brand,T2B,"Google|OpenAI|Amazon|Facebook/Meta|Apple|Microsoft|Perplexity|Anthropic|NVIDIA|DeepSeek",Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
+38,AI,Responsible AI Leadership,GO21,Per Brand,T2B,"Google|OpenAI|Amazon|Facebook/Meta|Apple|Microsoft|Perplexity|Anthropic|NVIDIA|DeepSeek",Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
 39,AI,Data Privacy Trust by Company,GO23,Per Brand,T2B,"Google|OpenAI|Amazon|Facebook/Meta|Apple|Microsoft|Perplexity|Anthropic|NVIDIA|DeepSeek",Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
-40,AI,AI Development Attributes — Gen Pop,Go22,Per Brand,T2B,"Google|OpenAI|Amazon|Facebook/Meta|Apple|Microsoft|Perplexity|Anthropic|NVIDIA|DeepSeek",Gen Pop,W3,pivot,
-41,AI,AI Development Attributes — Tech Elites,Go22,Per Brand,T2B,"Google|OpenAI|Amazon|Facebook/Meta|Apple|Microsoft|Perplexity|Anthropic|NVIDIA|DeepSeek",Tech Elites,W3,pivot,
-42,AI,AI Development Attributes — AI Fans,Go22,Per Brand,T2B,"Google|OpenAI|Amazon|Facebook/Meta|Apple|Microsoft|Perplexity|Anthropic|NVIDIA|DeepSeek",AI Fans,W3,pivot,
-43,AI,AI Development Attributes — Gen Z,Go22,Per Brand,T2B,"Google|OpenAI|Amazon|Facebook/Meta|Apple|Microsoft|Perplexity|Anthropic|NVIDIA|DeepSeek",Gen Z,W3,pivot,
+40,AI,AI Development Attributes — Gen Pop,Grid_GO22,Per Brand,T2B,"Google|OpenAI|Amazon|Facebook/Meta|Apple|Microsoft|Perplexity|Anthropic|NVIDIA|DeepSeek",Gen Pop,W3,pivot,
+41,AI,AI Development Attributes — Tech Elites,Grid_GO22,Per Brand,T2B,"Google|OpenAI|Amazon|Facebook/Meta|Apple|Microsoft|Perplexity|Anthropic|NVIDIA|DeepSeek",Tech Elites,W3,pivot,
+42,AI,AI Development Attributes — AI Fans,Grid_GO22,Per Brand,T2B,"Google|OpenAI|Amazon|Facebook/Meta|Apple|Microsoft|Perplexity|Anthropic|NVIDIA|DeepSeek",AI Fans,W3,pivot,
+43,AI,AI Development Attributes — Gen Z,Grid_GO22,Per Brand,T2B,"Google|OpenAI|Amazon|Facebook/Meta|Apple|Microsoft|Perplexity|Anthropic|NVIDIA|DeepSeek",Gen Z,W3,pivot,
 44,AI,Google AI Leadership by Use Case — Summary,Grid_GO37,,T2B,Google,Gen Pop|Gen Z|Tech Elites|AI Fans,W3,standard,
 45,AI,AI Leadership Use Cases — Gen Pop,Grid_GO37,Per Brand,T2B,"Google|Apple|Amazon|Facebook/Meta|OpenAI|Microsoft|Perplexity|Anthropic|NVIDIA|DeepSeek",Gen Pop,W3,pivot,Statements changed W3→W4 — verify use case alignment
 47,AI,AI Leadership Use Cases — Tech Elites,Grid_GO37,Per Brand,T2B,"Google|Apple|Amazon|Facebook/Meta|OpenAI|Microsoft|Perplexity|Anthropic|NVIDIA|DeepSeek",Tech Elites,W3,pivot,
 49,AI,AI Leadership Use Cases — AI Fans,Grid_GO37,Per Brand,T2B,"Google|Apple|Amazon|Facebook/Meta|OpenAI|Microsoft|Perplexity|Anthropic|NVIDIA|DeepSeek",AI Fans,W3,pivot,
 51,AI,AI Leadership Use Cases — Gen Z,Grid_GO37,Per Brand,T2B,"Google|Apple|Amazon|Facebook/Meta|OpenAI|Microsoft|Perplexity|Anthropic|NVIDIA|DeepSeek",Gen Z,W3,pivot,
-53,AI,AI Risks by Tool,Go35,,T2B,,Gen Pop,W3,standard,
+53,AI,AI Risks by Tool,Grid_GO35,Per Assistant,T2B,"Google Gemini|Microsoft Copilot|OpenAI's ChatGPT|Perplexity|Meta AI|Grok|Anthropic's Claude|Apple's Siri AI",Gen Pop,W3,pivot,AI tools as columns / risk statements as rows
 54,AI Assistants,AI Assistant Usage by Purpose — Gen Pop,Grid_GO25_26,Per Assistant,T2B,"Google Gemini|Microsoft Copilot|OpenAI's ChatGPT|Perplexity|Meta AI|Grok|Anthropic's Claude|Apple's Siri AI",Gen Pop,W3,pivot,Purposes as rows / assistants as columns; W4 adds Claude + Siri AI
 55,AI Assistants,AI Assistant Usage by Purpose — AI Fans + Gen Z,Grid_GO25_26,Per Assistant,T2B,"Google Gemini|Microsoft Copilot|OpenAI's ChatGPT|Perplexity|Meta AI|Grok|Anthropic's Claude|Apple's Siri AI",AI Fans|Gen Z,W3,pivot,
 ,AI Assistants,AI Assistant Usage Rank (by purpose),GO25_rank3,,MEAN RANK,"Google Gemini|Microsoft Copilot|OpenAI's ChatGPT|Perplexity|Meta AI|Grok|Anthropic's Claude|Apple's Siri AI",Gen Pop|Tech Elites|AI Fans|Gen Z,,standard,Rank 1-3 per purpose; new W4 question — no W3 trend
@@ -43,8 +43,8 @@ Slide,Section,Slide_Title,Question_Code,Sheet_Type,Metric,Brands_Entities,Audien
 58,AI Assistants,AI Assistant Perception (AI Fans + Gen Z),Grid_GO27,Per Assistant,T2B,"Google Gemini|Microsoft Copilot|OpenAI's ChatGPT|Perplexity|Meta AI|Grok|Anthropic's Claude|Apple's Siri AI",AI Fans|Gen Z,W3,pivot,
 60,Commerce,Online Shopping Tool Usage (T4B),GO42,,T4B,"Google Shopping|Amazon|Walmart.com|OpenAI's ChatGPT|Shopify",Gen Pop|Tech Elites,W3,standard,
 61,Commerce,Shopping Experience Attributes (T2B),GO43_Loop,Per Brand,T2B,"Google Shopping|Amazon|Walmart.com|OpenAI's ChatGPT|Shopify",Gen Pop,W3,pivot,Brands as columns / experience statements as rows
-63,Media Consumption,News Consumption Frequency,godem7,,All options,,Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
-64,Media Consumption,Trusted News Mediums,godem9,,T2B,,Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
+63,Media Consumption,News Consumption Frequency,GOdem7,,All options,,Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
+64,Media Consumption,Trusted News Mediums,GOdem9,,T2B,,Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
 ,W4 New,AI Sentiments (T2B),GO44,,T2B,,Gen Pop|Tech Elites|AI Fans|Gen Z,,standard,New W4 question — 8 statements about AI's transformative potential; no brands
 ,W4 New,Trust in AI Safety Controls (T2B),GO46,Per Brand,T2B,"Google|Apple|Facebook/Meta|OpenAI|Microsoft",Gen Pop|Tech Elites|AI Fans|Gen Z,,standard,New W4 question — "I trust X to have the right safety controls and parental settings"
 ,W4 New,Trust in AI Safety Controls (B2B),GO46,Per Brand,B2B,"Google|Apple|Facebook/Meta|OpenAI|Microsoft",Gen Pop|Tech Elites|AI Fans|Gen Z,,standard,
