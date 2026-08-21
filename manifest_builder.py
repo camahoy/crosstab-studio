@@ -163,10 +163,12 @@ def parse_manifest_csv(csv_bytes):
 # ── Audience / column matching ────────────────────────────────────────────────
 
 _AUDIENCE_PATTERNS = {
-    "Gen Pop":    ["gen pop", "general population", "total", "adult"],
-    "Tech Elite": ["tech elite", "technology elite", "tech"],
-    "AI Fan":     ["ai fan", "ai fans", "artificial intelligence fan"],
-    "Gen Z":      ["gen z", "generation z", "18-29", "18–29", "genz"],
+    "Gen Pop":     ["gen pop", "general population", "total", "adult"],
+    "Tech Elite":  ["tech elite", "technology elite", "tech"],
+    "Tech Elites": ["tech elite", "tech elites", "technology elite", "tech"],
+    "AI Fan":      ["ai fan", "ai fans", "artificial intelligence fan"],
+    "AI Fans":     ["ai fan", "ai fans", "artificial intelligence fan"],
+    "Gen Z":       ["gen z", "generation z", "18-29", "18–29", "genz"],
 }
 
 def _match_col_for_audience(cols, audience_name):
@@ -190,11 +192,12 @@ def _match_col_for_audience(cols, audience_name):
             if pat in combined:
                 return idx
 
-    # Third: fuzzy — any word from audience in column name
+    # Third: fuzzy — any word from audience in column name (singular/plural tolerant)
     words = audience_lc.split()
     for idx, name, sub in cols:
         col_lc = (name + " " + sub).lower()
-        if any(w in col_lc for w in words if len(w) > 2):
+        if any(w in col_lc or w.rstrip('s') in col_lc
+               for w in words if len(w) > 2):
             return idx
 
     return None
