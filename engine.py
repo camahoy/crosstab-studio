@@ -724,8 +724,8 @@ _SUMMARY_MARKERS = frozenset([
 
 def _sheet_type_from_text(text):
     tl = text.lower()
-    if 'top 2 box' in tl or 'top box summary' in tl:   return 't2b'
-    if 'bottom 2 box' in tl or 'bottom box summary' in tl: return 'b2b'
+    if 't2b' in tl or 'top 2 box' in tl or 'top box summary' in tl:   return 't2b'
+    if 'b2b' in tl or 'bottom 2 box' in tl or 'bottom box summary' in tl: return 'b2b'
     if 'grid table' in tl or 'summary grid' in tl:      return 'summary_grid'
     if 'mean' in tl or 'average' in tl:                 return 'mean'
     return 'standard'

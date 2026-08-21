@@ -575,11 +575,7 @@ def extract_grid_slide(manifest_row, w4_caches, w4_col_maps,
             all_sheets = cache.entries_for(prefix)
 
             for brand in brands:
-                # For pivot/grid tables, the Summary Grid sheet has statements as rows
-                # (each statement label + its T2B value row). The T2B-Summary sheet
-                # has scale response options as rows (aggregate CEO breakdown) — wrong.
-                matched_si, _ = _pick_brand_sheet(all_sheets, brand, metric,
-                                                   preferred_stype='summary_grid')
+                matched_si, _ = _pick_brand_sheet(all_sheets, brand, metric)
 
                 if matched_si is None:
                     continue
