@@ -518,7 +518,8 @@ def _parse_sheet_raw(raw, profile, profile_name, col_indices):
             if any(s in cl for s in stop_on): break
             if any(cl.startswith(s) for s in ('base:', 'unweighted base', 'base: at least',
                                                'base =', 'weighted base', 'base unweighted',
-                                               'upper case', 'lower case', 'field dates')):
+                                               'upper case', 'lower case', 'field dates',
+                                               'minimum base', 'small base')):
                 i += 1; continue
 
             val_row = raw[i + val_off] if i + val_off < len(raw) else []

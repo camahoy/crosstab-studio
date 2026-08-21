@@ -22,7 +22,7 @@ PROFILES = {
         "value_row_offset":     1,
         "skip_sheet_0":         True,
         "column_start":         1,
-        "stop_on":              ["sigma"],
+        "stop_on":              ["sigma", "overlap formula used"],
         "coerce_strings":       False,
         "multi_file_mode":      "waves",
     },
