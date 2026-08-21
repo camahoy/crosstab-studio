@@ -475,11 +475,34 @@ def extract_slide_data(manifest_row, cache, col_map):
                 "base": base_vals, "wording": wording_seen}
 
     else:
-        parsed_list = cache.parsed_for(prefix)
-        if not parsed_list:
+        all_sheets = cache.entries_for(prefix)
+        if not all_sheets:
             return {"found": False, "rows": [], "base": {}, "wording": ""}
 
-        p = parsed_list[0]
+        # Prefer metric-matching sheet (T2B-Summary, B2B-Summary, etc.)
+        metric_lc = metric.strip().lower()
+        pref_stype = None
+        if metric_lc in ('t2b', 'top 2 box', 'top 2 box (net)'):
+            pref_stype = 't2b'
+        elif metric_lc in ('b2b', 'bottom 2 box', 'bottom 2 box (net)'):
+            pref_stype = 'b2b'
+        elif metric_lc in ('mean', 'summary - mean'):
+            pref_stype = 'mean'
+
+        chosen_si = None
+        fallback_si = None
+        for si, word, stype in all_sheets:
+            if fallback_si is None:
+                fallback_si = si
+            if pref_stype and pref_stype in stype.lower():
+                chosen_si = si
+                break
+        if chosen_si is None:
+            chosen_si = fallback_si
+
+        p = cache.parsed_sheet(chosen_si)
+        if not p:
+            return {"found": False, "rows": [], "base": {}, "wording": ""}
         wording = p.get("wording", "")
 
         base_vals = {}
