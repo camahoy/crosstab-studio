@@ -370,22 +370,22 @@ def _find_brand_in_wording(wording, brands):
     return None
 
 
-def _pick_brand_sheet(all_sheets, brand, metric):
+def _pick_brand_sheet(all_sheets, brand, metric, preferred_stype=None):
     """
     Return (sheet_idx, wording) for the best sheet matching brand.
-    Prefers sheets whose sheet_type contains the metric keyword
-    (e.g. metric='T2B' → prefers '[T2B - Summary]' over '[Summary Grid]').
+    preferred_stype overrides metric-based preference when provided.
+    Otherwise prefers sheets whose sheet_type matches the metric keyword.
     Falls back to the first brand-matching sheet.
     """
     metric_key = metric.strip().lower()
-    # Normalise common metric names to their banner suffix keywords
-    pref = None
-    if metric_key in ('t2b', 'top 2 box', 'top 2 box (net)'):
-        pref = 't2b'
-    elif metric_key in ('b2b', 'bottom 2 box', 'bottom 2 box (net)'):
-        pref = 'b2b'
-    elif metric_key in ('mean', 'summary - mean'):
-        pref = 'mean'
+    pref = preferred_stype
+    if pref is None:
+        if metric_key in ('t2b', 'top 2 box', 'top 2 box (net)'):
+            pref = 't2b'
+        elif metric_key in ('b2b', 'bottom 2 box', 'bottom 2 box (net)'):
+            pref = 'b2b'
+        elif metric_key in ('mean', 'summary - mean'):
+            pref = 'mean'
 
     first_match = None
     for si, word, stype in all_sheets:
@@ -575,7 +575,11 @@ def extract_grid_slide(manifest_row, w4_caches, w4_col_maps,
             all_sheets = cache.entries_for(prefix)
 
             for brand in brands:
-                matched_si, _ = _pick_brand_sheet(all_sheets, brand, metric)
+                # For pivot/grid tables, the Summary Grid sheet has statements as rows
+                # (each statement label + its T2B value row). The T2B-Summary sheet
+                # has scale response options as rows (aggregate CEO breakdown) — wrong.
+                matched_si, _ = _pick_brand_sheet(all_sheets, brand, metric,
+                                                   preferred_stype='summary_grid')
 
                 if matched_si is None:
                     continue
