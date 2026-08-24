@@ -13,10 +13,10 @@ Slide,Section,Slide_Title,Question_Code,Sheet_Type,Metric,Brands_Entities,Audien
 18,CEO Reputation,CEO Statements — Gen Z,Grid_GO16,Per CEO,T2B,"Sundar Pichai|Demis Hassabis|Satya Nadella|Dario Amodei|Andy Jassy|Tim Cook|Sam Altman|Mark Zuckerberg",Gen Z,W3,pivot,
 22,Search,Search Tool Usage Frequency (T4B),GO31,Per Tool,T4B,"DuckDuckGo|Google Search|Microsoft Bing|OpenAI's ChatGPT|Perplexity|Grok|Meta's AI Mode|Anthropic's Claude|TikTok|Instagram",Gen Pop|Tech Elite,W3,standard,W4 adds Meta's AI Mode / Anthropic's Claude / TikTok / Instagram
 23,Search,Google Search Attributes (T2B),Grid_GO32,,T2B,Google Search,Gen Pop|Tech Elite|AI Fan|Gen Z,W3,standard,Single-brand summary; statements as rows subgroups as columns
-25,Search,Search Tool Comparison — Gen Pop,Grid_GO32,Per Tool,T2B,"DuckDuckGo|Google Search|Microsoft Bing|OpenAI's ChatGPT|Perplexity|Grok|Meta's AI Mode|Anthropic's Claude",Gen Pop,W3,pivot,Tools as columns / statements as rows
-26,Search,Search Tool Comparison — Tech Elite,Grid_GO32,Per Tool,T2B,"DuckDuckGo|Google Search|Microsoft Bing|OpenAI's ChatGPT|Perplexity|Grok|Meta's AI Mode|Anthropic's Claude",Tech Elite,W3,pivot,
-27,Search,Search Tool Comparison — AI Fan,Grid_GO32,Per Tool,T2B,"DuckDuckGo|Google Search|Microsoft Bing|OpenAI's ChatGPT|Perplexity|Grok|Meta's AI Mode|Anthropic's Claude",AI Fan,W3,pivot,
-28,Search,Search Tool Comparison — Gen Z,Grid_GO32,Per Tool,T2B,"DuckDuckGo|Google Search|Microsoft Bing|OpenAI's ChatGPT|Perplexity|Grok|Meta's AI Mode|Anthropic's Claude",Gen Z,W3,pivot,
+25,Search,Search Tool Comparison — Gen Pop,Grid_GO32,Per Tool,T2B,"DuckDuckGo|Google Search|Microsoft Bing|OpenAI's ChatGPT|Perplexity|Grok|Meta's AI Mode|Anthropic's Claude|TikTok|Instagram",Gen Pop,W3,pivot,Tools as columns / statements as rows
+26,Search,Search Tool Comparison — Tech Elite,Grid_GO32,Per Tool,T2B,"DuckDuckGo|Google Search|Microsoft Bing|OpenAI's ChatGPT|Perplexity|Grok|Meta's AI Mode|Anthropic's Claude|TikTok|Instagram",Tech Elite,W3,pivot,
+27,Search,Search Tool Comparison — AI Fan,Grid_GO32,Per Tool,T2B,"DuckDuckGo|Google Search|Microsoft Bing|OpenAI's ChatGPT|Perplexity|Grok|Meta's AI Mode|Anthropic's Claude|TikTok|Instagram",AI Fan,W3,pivot,
+28,Search,Search Tool Comparison — Gen Z,Grid_GO32,Per Tool,T2B,"DuckDuckGo|Google Search|Microsoft Bing|OpenAI's ChatGPT|Perplexity|Grok|Meta's AI Mode|Anthropic's Claude|TikTok|Instagram",Gen Z,W3,pivot,
 29,Search,Search Reinvention Confidence (T2B),GO33,,T2B,"Google|OpenAI|Microsoft|Anthropic",Gen Pop|Tech Elite,W3,standard,W4 adds Anthropic
 31,AI,AI Use Frequency,GOdem5,,All options,,Gen Pop|Tech Elite|AI Fan|Gen Z,W3,standard,
 32,AI,AI Assistant Usage — Gen Pop + Tech Elite,GO24,Per Assistant,T4B,"Google Gemini|Microsoft Copilot|OpenAI's ChatGPT|Perplexity|Meta AI|Grok|Anthropic's Claude|Apple's Siri AI",Gen Pop|Tech Elite,W3,standard,W4 adds Anthropic's Claude + Apple's Siri AI
