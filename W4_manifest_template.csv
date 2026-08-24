@@ -11,7 +11,7 @@ Slide,Section,Slide_Title,Question_Code,Sheet_Type,Metric,Brands_Entities,Audien
 14,CEO Reputation,CEO Statements — Tech Elites,Grid_GO16,Per CEO,T2B,"Sundar Pichai|Demis Hassabis|Dario Amodei|Satya Nadella|Tim Cook|Andy Jassy|Sam Altman|Mark Zuckerberg",Tech Elites,W3,pivot,
 16,CEO Reputation,CEO Statements — AI Fans,Grid_GO16,Per CEO,T2B,"Sundar Pichai|Demis Hassabis|Dario Amodei|Satya Nadella|Andy Jassy|Tim Cook|Sam Altman|Mark Zuckerberg",AI Fans,W3,pivot,
 18,CEO Reputation,CEO Statements — Gen Z,Grid_GO16,Per CEO,T2B,"Sundar Pichai|Demis Hassabis|Satya Nadella|Dario Amodei|Andy Jassy|Tim Cook|Sam Altman|Mark Zuckerberg",Gen Z,W3,pivot,
-22,Search,Search Tool Usage Frequency (T4B),GO31,,T4B,"DuckDuckGo|Google Search|Microsoft Bing|OpenAI's ChatGPT|Perplexity|Grok|Meta's AI Mode|Anthropic's Claude|TikTok|Instagram",Gen Pop|Tech Elites,W3,standard,W4 adds Meta's AI Mode / Anthropic's Claude / TikTok / Instagram
+22,Search,Search Tool Usage Frequency (T4B),GO31,Per Tool,T4B,"DuckDuckGo|Google Search|Microsoft Bing|OpenAI's ChatGPT|Perplexity|Grok|Meta's AI Mode|Anthropic's Claude|TikTok|Instagram",Gen Pop|Tech Elites,W3,standard,W4 adds Meta's AI Mode / Anthropic's Claude / TikTok / Instagram
 23,Search,Google Search Attributes (T2B),Grid_GO32,,T2B,Google Search,Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,Single-brand summary; statements as rows subgroups as columns
 25,Search,Search Tool Comparison — Gen Pop,Grid_GO32,Per Tool,T2B,"DuckDuckGo|Google Search|Microsoft Bing|OpenAI's ChatGPT|Perplexity|Grok|Meta's AI Mode|Anthropic's Claude",Gen Pop,W3,pivot,Tools as columns / statements as rows
 26,Search,Search Tool Comparison — Tech Elites,Grid_GO32,Per Tool,T2B,"DuckDuckGo|Google Search|Microsoft Bing|OpenAI's ChatGPT|Perplexity|Grok|Meta's AI Mode|Anthropic's Claude",Tech Elites,W3,pivot,
@@ -19,8 +19,8 @@ Slide,Section,Slide_Title,Question_Code,Sheet_Type,Metric,Brands_Entities,Audien
 28,Search,Search Tool Comparison — Gen Z,Grid_GO32,Per Tool,T2B,"DuckDuckGo|Google Search|Microsoft Bing|OpenAI's ChatGPT|Perplexity|Grok|Meta's AI Mode|Anthropic's Claude",Gen Z,W3,pivot,
 29,Search,Search Reinvention Confidence (T2B),GO33,,T2B,"Google|OpenAI|Microsoft|Anthropic",Gen Pop|Tech Elites,W3,standard,W4 adds Anthropic
 31,AI,AI Use Frequency,GOdem5,,All options,,Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
-32,AI,AI Assistant Usage — Gen Pop + Tech Elites,GO24,,T4B,"Google Gemini|Microsoft Copilot|OpenAI's ChatGPT|Perplexity|Meta AI|Grok|Anthropic's Claude|Apple's Siri AI",Gen Pop|Tech Elites,W3,standard,W4 adds Anthropic's Claude + Apple's Siri AI
-33,AI,AI Assistant Usage — AI Fans + Gen Z,GO24,,T4B,"Google Gemini|Microsoft Copilot|OpenAI's ChatGPT|Perplexity|Meta AI|Grok|Anthropic's Claude|Apple's Siri AI",AI Fans|Gen Z,W3,standard,
+32,AI,AI Assistant Usage — Gen Pop + Tech Elites,GO24,Per Assistant,T4B,"Google Gemini|Microsoft Copilot|OpenAI's ChatGPT|Perplexity|Meta AI|Grok|Anthropic's Claude|Apple's Siri AI",Gen Pop|Tech Elites,W3,standard,W4 adds Anthropic's Claude + Apple's Siri AI
+33,AI,AI Assistant Usage — AI Fans + Gen Z,GO24,Per Assistant,T4B,"Google Gemini|Microsoft Copilot|OpenAI's ChatGPT|Perplexity|Meta AI|Grok|Anthropic's Claude|Apple's Siri AI",AI Fans|Gen Z,W3,standard,
 34,AI,AI Familiarity,GO17,,All options,,Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
 35,AI,AI Future Optimism,GOdem6,,T2B,,Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
 36,AI,Trust in AI,GO19,,T2B,,Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
@@ -41,7 +41,7 @@ Slide,Section,Slide_Title,Question_Code,Sheet_Type,Metric,Brands_Entities,Audien
 ,AI Assistants,AI Assistant Usage Rank (by purpose),GO25_rank3,,MEAN RANK,"Google Gemini|Microsoft Copilot|OpenAI's ChatGPT|Perplexity|Meta AI|Grok|Anthropic's Claude|Apple's Siri AI",Gen Pop|Tech Elites|AI Fans|Gen Z,,standard,Rank 1-3 per purpose; new W4 question — no W3 trend
 57,AI Assistants,AI Assistant Perception (Gen Pop + Tech Elites),Grid_GO27,Per Assistant,T2B,"Google Gemini|Microsoft Copilot|OpenAI's ChatGPT|Perplexity|Meta AI|Grok|Anthropic's Claude|Apple's Siri AI",Gen Pop|Tech Elites,W3,pivot,Statements changed W3→W4; W4 adds Claude + Siri AI
 58,AI Assistants,AI Assistant Perception (AI Fans + Gen Z),Grid_GO27,Per Assistant,T2B,"Google Gemini|Microsoft Copilot|OpenAI's ChatGPT|Perplexity|Meta AI|Grok|Anthropic's Claude|Apple's Siri AI",AI Fans|Gen Z,W3,pivot,
-60,Commerce,Online Shopping Tool Usage (T4B),GO42,,T4B,"Google Shopping|Amazon|Walmart.com|OpenAI's ChatGPT|Shopify",Gen Pop|Tech Elites,W3,standard,
+60,Commerce,Online Shopping Tool Usage (T4B),GO42,Per Brand,T4B,"Google Shopping|Amazon|Walmart.com|OpenAI's ChatGPT|Shopify",Gen Pop|Tech Elites,W3,standard,
 61,Commerce,Shopping Experience Attributes (T2B),GO43_Loop,Per Brand,T2B,"Google Shopping|Amazon|Walmart.com|OpenAI's ChatGPT|Shopify",Gen Pop,W3,pivot,Brands as columns / experience statements as rows
 63,Media Consumption,News Consumption Frequency,GOdem7,,All options,,Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,
 64,Media Consumption,Trusted News Mediums,GOdem9,,T2B,,Gen Pop|Tech Elites|AI Fans|Gen Z,W3,standard,

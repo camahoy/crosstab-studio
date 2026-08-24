@@ -177,7 +177,7 @@ def _match_col_for_audience(cols, audience_name):
     cols = [(col_idx, name, sublabel), ...]
     Returns col_idx or None.
     """
-    audience_lc = audience_name.lower()
+    audience_lc = _norm(audience_name).lower()
     patterns = _AUDIENCE_PATTERNS.get(audience_name, [audience_lc])
 
     # First: exact match on col name
@@ -361,11 +361,15 @@ def _extract_metric(parsed, metric_type, brands_filter=None):
     return rows
 
 
+def _norm(s):
+    """Normalise apostrophes/quotes so straight and curly match."""
+    return s.replace('’', "'").replace('‘', "'").replace('“', '"').replace('”', '"')
+
 def _find_brand_in_wording(wording, brands):
     """Return which brand from the list appears in this sheet's wording, or None."""
-    wl = wording.lower()
+    wl = _norm(wording).lower()
     for b in brands:
-        if b.lower() in wl:
+        if _norm(b).lower() in wl:
             return b
     return None
 
