@@ -597,8 +597,7 @@ ALT_FILL    = PatternFill("solid", fgColor="F6F8FA")
 def _fmt_pct(v):
     if v is None: return '—'
     if isinstance(v, float):
-        pct = math.floor(v*100) if v*100 - math.floor(v*100) < 0.5 else math.ceil(v*100)
-        return f"{pct}%"
+        return f"{round(v * 100)}%"
     return str(v)
 
 
