@@ -213,6 +213,30 @@ def get_audience_col_map(file_bytes, profile_name, audience_list):
     return {aud: _match_col_for_audience(cols, aud) for aud in audience_list}
 
 
+_W3_MARKERS = ["w3", "wave 3", "wave3", "previous", "prev", "prior",
+               "last wave", "w-3", "wv3", "p wave", "pw"]
+
+def get_w3_col_map_from_banner(file_bytes, profile_name, audience_list):
+    """
+    Detect previous-wave (W3) columns that already exist in a current-wave banner.
+    Looks for columns whose name contains both an audience keyword AND a W3 marker
+    (e.g. 'Gen Pop W3', 'Tech Elite (Previous)').
+    Returns {audience_name: col_idx} or {} if nothing found.
+    """
+    cols = _engine.get_columns(file_bytes, profile_name)
+    result = {}
+    for aud in audience_list:
+        patterns = _AUDIENCE_PATTERNS.get(aud, [_norm(aud).lower()])
+        for idx, name, sub in cols:
+            col_text = _norm((name + " " + sub)).lower()
+            is_aud   = any(p in col_text for p in patterns)
+            is_w3    = any(m in col_text for m in _W3_MARKERS)
+            if is_aud and is_w3 and idx not in result.values():
+                result[aud] = idx
+                break
+    return result
+
+
 def get_total_col_map(file_bytes, profile_name, label):
     """
     Return {label: col_idx} where col_idx is the 'Total' column in this file.
@@ -697,8 +721,17 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
         else:
             w3_col_maps = [get_audience_col_map(f["bytes"], profile_name, all_audiences)
                            for f in w3_files]
+        w3_from_w4 = False
     else:
-        w3_col_maps = []
+        # No separate W3 files — look for W3 columns embedded in the W4 banner(s)
+        detected = [get_w3_col_map_from_banner(f["bytes"], profile_name, all_audiences)
+                    for f in w4_files]
+        if any(detected):
+            w3_col_maps = detected
+            w3_from_w4  = True   # W3 data lives in same files as W4
+        else:
+            w3_col_maps = []
+            w3_from_w4  = False
 
     def _merged_col_map(col_maps, aud_list):
         result = {}
@@ -710,9 +743,13 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
         return result
 
     # ── Step 3: pre-parse each banner file ONCE into a BannerCache ───────────
-    # Build union of all col_indices needed across all files
-    all_w4_cols = sorted({ci for cm in w4_col_maps for ci in cm.values() if ci is not None})
-    all_w3_cols = sorted({ci for cm in w3_col_maps for ci in cm.values() if ci is not None})
+    # Build union of all col_indices needed across all files (W4 + W3 in same file)
+    all_w4_cols = sorted({ci for cm in w4_col_maps for ci in cm.values() if ci is not None}
+                       | {ci for cm in w3_col_maps for ci in cm.values() if ci is not None}
+                         if w3_from_w4 else
+                         {ci for cm in w4_col_maps for ci in cm.values() if ci is not None})
+    all_w3_cols = ([] if w3_from_w4
+                   else sorted({ci for cm in w3_col_maps for ci in cm.values() if ci is not None}))
 
     # Build one BannerCache per file — each opens the Excel once and parses all sheets
     n_w4 = len(w4_files)
@@ -735,12 +772,16 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
                          progress_cb=lambda d, t, _fi=fi: _sheet_progress(_fi, d, t))
         w4_caches.append(bc)
 
-    w3_caches = []
-    for fi, finfo in enumerate(w3_files):
-        bc = BannerCache(finfo["bytes"], profile_name, all_w3_cols,
-                         prefixes_needed=spec_prefixes,
-                         progress_cb=lambda d, t, _fi=fi: _sheet_progress(n_w4 + _fi, d, t))
-        w3_caches.append(bc)
+    if w3_from_w4:
+        # W3 columns are inside the W4 banner — reuse the same cache objects
+        w3_caches = w4_caches
+    else:
+        w3_caches = []
+        for fi, finfo in enumerate(w3_files):
+            bc = BannerCache(finfo["bytes"], profile_name, all_w3_cols,
+                             prefixes_needed=spec_prefixes,
+                             progress_cb=lambda d, t, _fi=fi: _sheet_progress(n_w4 + _fi, d, t))
+            w3_caches.append(bc)
 
     # ── Step 4: group manifest rows by section and write Excel ────────────────
     sections = {}
@@ -771,7 +812,7 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
         for mrow in sections[sec]:
             prefix     = mrow["prefix"]
             audiences  = mrow["audiences"]
-            do_wave    = mrow["wave_compare"].lower().startswith("w") and bool(w3_files)
+            do_wave    = mrow["wave_compare"].lower().startswith("w") and bool(w3_caches)
             is_missing = prefix in missing_prefixes
             is_new_q   = mrow["wave_compare"].lower() == "n/a - new"
 
@@ -1266,6 +1307,19 @@ def show_manifest_builder():
                 all_w4_prefixes |= get_all_prefixes(finfo["bytes"], mb_profile)
 
             prog_area.progress(0.2)
+
+            # Inform user if W3 columns were auto-detected inside the W4 banner
+            if not w3_uploads:
+                sample_w3 = get_w3_col_map_from_banner(
+                    w4_files[0]["bytes"], mb_profile,
+                    list({a for r in manifest_rows for a in r["audiences"]})
+                )
+                if sample_w3:
+                    st.info(
+                        f"📊 Previous-wave (W3) columns detected inside your banner "
+                        f"({', '.join(sample_w3.keys())}) — trended tables will be included automatically."
+                    )
+
             status_area.markdown(
                 "<div style='font-size:0.82rem;color:#374151'>Step 2 of 3 — Matching columns…</div>",
                 unsafe_allow_html=True,
