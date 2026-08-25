@@ -6,6 +6,7 @@ extracts specified metrics per slide, writes structured Excel output.
 
 import io, re, math
 import csv
+from decimal import Decimal, ROUND_HALF_UP
 import streamlit as st
 import pandas as pd
 import openpyxl
@@ -245,12 +246,11 @@ def get_all_prefixes(file_bytes, profile_name):
 # ── Metric extraction ─────────────────────────────────────────────────────────
 
 def _fmt(v):
-    """Format a float value as percentage string."""
+    """Format a float value as integer percentage, matching banner rounding exactly."""
     if v is None or (isinstance(v, float) and math.isnan(v)):
         return None
     if isinstance(v, float):
-        pct = round(v * 100)
-        return pct
+        return int((Decimal(str(v)) * 100).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
     if isinstance(v, str):
         return v
     return v
@@ -472,9 +472,17 @@ def extract_slide_data(manifest_row, cache, col_map):
 
             rows = _extract_metric(p_view, metric, brands_filter=None)
             if rows:
-                _, vals = rows[0]
-                row_dict = {aud: _fmt(vals[ai]) for ai, aud in enumerate(aud_order) if ai < len(vals)}
-                result_rows.append((brand, row_dict))
+                if len(rows) == 1:
+                    _, vals = rows[0]
+                    row_dict = {aud: _fmt(vals[ai]) for ai, aud in enumerate(aud_order) if ai < len(vals)}
+                    result_rows.append((brand, row_dict))
+                else:
+                    # Multiple rows (e.g. "All options" for rank questions) —
+                    # emit one row per rank position labelled "Brand — Rank N"
+                    for row_label, vals in rows:
+                        label = f"{brand} — {row_label}" if row_label else brand
+                        row_dict = {aud: _fmt(vals[ai]) for ai, aud in enumerate(aud_order) if ai < len(vals)}
+                        result_rows.append((label, row_dict))
             else:
                 result_rows.append((brand, {aud: None for aud in aud_order}))
 
