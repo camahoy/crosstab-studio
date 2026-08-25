@@ -597,7 +597,8 @@ ALT_FILL    = PatternFill("solid", fgColor="F6F8FA")
 def _fmt_pct(v):
     if v is None: return '—'
     if isinstance(v, float):
-        return f"{round(v * 100)}%"
+        # Use round-half-up (Excel/banner convention) to avoid introducing our own rounding bias
+        return f"{int(math.floor(v * 100 + 0.5))}%"
     return str(v)
 
 
