@@ -329,7 +329,7 @@ def _extract_metric(parsed, metric_type, brands_filter=None):
         if rows:
             return rows
 
-        # Last resort: sum top 2 numeric rows
+        # Last resort: sum top 2 numeric rows using Decimal to avoid float drift
         numeric_rows = [(a, v) for a, v in zip(answers, values)
                         if v and any(isinstance(x, float) for x in v)]
         if len(numeric_rows) >= 2:
@@ -338,17 +338,30 @@ def _extract_metric(parsed, metric_type, brands_filter=None):
             n_c = max(len(v1), len(v2))
             combined = []
             for ci in range(n_c):
-                x1 = v1[ci] if ci < len(v1) and isinstance(v1[ci], float) else 0.0
-                x2 = v2[ci] if ci < len(v2) and isinstance(v2[ci], float) else 0.0
-                combined.append(x1 + x2)
+                x1 = (Decimal(str(v1[ci])) if ci < len(v1) and isinstance(v1[ci], float)
+                      else Decimal('0'))
+                x2 = (Decimal(str(v2[ci])) if ci < len(v2) and isinstance(v2[ci], float)
+                      else Decimal('0'))
+                combined.append(float(x1 + x2))
             return [("Top 2 Box (computed)", combined)]
         return []
 
-    # T4B → find "Top 4 Box" row; fallback: sum top 4
+    # T4B → find "Top 4 Box" row; fallback: sum top 4 using Decimal to avoid float drift
     if "t4b" in metric_lc:
         for i, ans in enumerate(answers):
             al = ans.lower()
-            if "top 4 box" in al or al.startswith("t4b") or al == "top 4":
+            if (
+                "top 4 box" in al
+                or "top four box" in al
+                or "t4 box" in al
+                or al.startswith("t4b")
+                or al == "top 4"
+                or al == "4+ box"
+                or "4+ box" in al
+                or "top 4 (net)" in al
+                or "top four (net)" in al
+                or "net: top 4" in al
+            ):
                 return [(ans, values[i] if i < len(values) else [])]
         numeric_rows = [(a, v) for a, v in zip(answers, values)
                         if v and any(isinstance(x, float) for x in v)]
@@ -357,10 +370,11 @@ def _extract_metric(parsed, metric_type, brands_filter=None):
             n_c = max(len(r[1]) for r in numeric_rows[:4])
             for ci in range(n_c):
                 total = sum(
-                    r[1][ci] if ci < len(r[1]) and isinstance(r[1][ci], float) else 0.0
+                    (Decimal(str(r[1][ci])) if ci < len(r[1]) and isinstance(r[1][ci], float)
+                     else Decimal('0'))
                     for r in numeric_rows[:4]
                 )
-                combined.append(total)
+                combined.append(float(total))
             return [("Top 4 Box (computed)", combined)]
         return []
 
@@ -1137,11 +1151,14 @@ def build_cuts_excel(manifest_rows, w4_files, w3_files, profile_name,
 
 # ── Streamlit UI ──────────────────────────────────────────────────────────────
 
+_MB_VERSION = "2025-08-25.1"
+
 def show_manifest_builder():
     st.markdown(
-        "<div style='font-size:0.82rem;color:#374151;margin-bottom:16px'>"
+        f"<div style='font-size:0.82rem;color:#374151;margin-bottom:16px'>"
         "Upload your cuts spec CSV and banner file(s) from the DP team. "
         "The tool extracts exactly the metrics you need and outputs clean, report-ready tables."
+        f"<span style='float:right;color:#9CA3AF;font-size:0.7rem'>v{_MB_VERSION}</span>"
         "</div>",
         unsafe_allow_html=True,
     )
