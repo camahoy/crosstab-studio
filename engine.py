@@ -7,6 +7,7 @@ Wave-by-wave comparison support.
 print("CROSSTAB STUDIO ENGINE v1.1")
 
 import io, math, re, os, json
+from decimal import Decimal, ROUND_HALF_UP
 from collections import Counter
 import numpy as np
 import pandas as pd
@@ -597,8 +598,10 @@ ALT_FILL    = PatternFill("solid", fgColor="F6F8FA")
 def _fmt_pct(v):
     if v is None: return '—'
     if isinstance(v, float):
-        # Use round-half-up (Excel/banner convention) to avoid introducing our own rounding bias
-        return f"{int(math.floor(v * 100 + 0.5))}%"
+        # Convert via str() first to avoid floating-point representation errors,
+        # then apply round-half-up to match Excel/banner display exactly.
+        pct = (Decimal(str(v)) * 100).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+        return f"{pct}%"
     return str(v)
 
 
