@@ -46,10 +46,10 @@ Slide,Section,Slide_Title,Question_Code,Sheet_Type,Metric,Brands_Entities,Audien
 61,Commerce,Shopping Experience Attributes (T2B),GO43_Loop,Per Brand,T2B,"Google Shopping|Amazon|Walmart.com|OpenAI's ChatGPT|Shopify",Gen Pop,W3,pivot,Brands as columns / experience statements as rows
 63,Media Consumption,News Consumption Frequency,GOdem7,,All options,,Gen Pop|Tech Elite|AI Fan|Gen Z,W3,standard,
 64,Media Consumption,Trusted News Mediums,GOdem9,,T2B,,Gen Pop|Tech Elite|AI Fan|Gen Z,W3,standard,
-,W4 New,GO45 Statements — Gen Pop,Grid_GO45,Per Brand,T2B,"Google|OpenAI|Microsoft|Apple|Amazon|Facebook/Meta|Anthropic",Gen Pop,,pivot,New W4 — statements as rows / companies as columns; confirm company list
-,W4 New,GO45 Statements — Tech Elite,Grid_GO45,Per Brand,T2B,"Google|OpenAI|Microsoft|Apple|Amazon|Facebook/Meta|Anthropic",Tech Elite,,pivot,
-,W4 New,GO45 Statements — AI Fan,Grid_GO45,Per Brand,T2B,"Google|OpenAI|Microsoft|Apple|Amazon|Facebook/Meta|Anthropic",AI Fan,,pivot,
-,W4 New,GO45 Statements — Gen Z,Grid_GO45,Per Brand,T2B,"Google|OpenAI|Microsoft|Apple|Amazon|Facebook/Meta|Anthropic",Gen Z,,pivot,
+,W4 New,GO45 Statements — Gen Pop,Grid_GO45,Per Brand,T2B,"Google|Amazon|Facebook/Meta|Microsoft",Gen Pop,,pivot,New W4 — statements as rows / companies as columns
+,W4 New,GO45 Statements — Tech Elite,Grid_GO45,Per Brand,T2B,"Google|Amazon|Facebook/Meta|Microsoft",Tech Elite,,pivot,
+,W4 New,GO45 Statements — AI Fan,Grid_GO45,Per Brand,T2B,"Google|Amazon|Facebook/Meta|Microsoft",AI Fan,,pivot,
+,W4 New,GO45 Statements — Gen Z,Grid_GO45,Per Brand,T2B,"Google|Amazon|Facebook/Meta|Microsoft",Gen Z,,pivot,
 ,W4 New,AI Sentiments (T2B),GO44,,T2B,,Gen Pop|Tech Elite|AI Fan|Gen Z,,standard,New W4 question — 8 statements about AI's transformative potential; no brands
 ,W4 New,Trust in AI Safety Controls (T2B),GO46,Per Brand,T2B,"Google|Apple|Facebook/Meta|OpenAI|Microsoft",Gen Pop|Tech Elite|AI Fan|Gen Z,,standard,New W4 question — "I trust X to have the right safety controls and parental settings"
 ,W4 New,Trust in AI Safety Controls (B2B),GO46,Per Brand,B2B,"Google|Apple|Facebook/Meta|OpenAI|Microsoft",Gen Pop|Tech Elite|AI Fan|Gen Z,,standard,
